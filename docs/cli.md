@@ -236,7 +236,7 @@ whose dormant list can't be fetched has nothing pruned that run.
 
 ### Dashboard keys (`watch`)
 
-The dashboard has tabs — **Sessions · PRs · Tasks · Todo · Usage · Brain · Notepad · Settings** — on its
+The dashboard has tabs — **Sessions · Claw · PRs · Tasks · Todo · Usage · Brain · Notepad · Settings** — on its
 first row. Tab / Shift-Tab, Shift-→ / Shift-← (or a tap on the bar) switch them; on a narrow pane the bar shortens to
 `Ses PR Tsk …`, then to `‹ Active ›` whose arrows step to the neighbouring tab. The Sessions label
 carries `⏸N` while N sessions wait for you, so it shows from every tab. Session polling and
@@ -279,6 +279,7 @@ button at the right end of the tab bar, on any tab — reloads now):
 
 | tab | keys |
 | --- | --- |
+| Claw | a chat with **Claw**, an operator Claude session (tmux `claw`, started on first visit in `${XDG_STATE_HOME:-~/.local/state}/bearclaw/claw`, or `$BEARCLAW_CLAW_DIR`) that runs bearclaw for you — "what's everyone doing", "fill in the todo and sticky notes", "tell work-2 to rerun the tests". Its brief is the workspace's `CLAUDE.md` (rewritten on every start; your additions go in `CLAUDE.local.md`), and `.claude/settings.json` lets it run `bearclaw`, `jq` and `date` without prompts. It asks before sending to or starting sessions. Every key goes to it; Ctrl+L (or a tap on its header) goes back to Sessions. Its session is left out of the Sessions list |
 | PRs | `bearclaw prs` as a kanban, lanes as in tb-pr: **Draft · In review · Ready to merge · Waiting on me · Mentions** (shown even when empty; "waiting on author" has no lane), one card per PR (checks, title, `repo#N`, size, age, comments) · ←/→ `h`/`l` lane · ↑/↓ `j`/`k` card · Enter/`o` open in the browser; on a narrow pane the lanes page, `‹`/`›` marking more |
 | Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
 | Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |

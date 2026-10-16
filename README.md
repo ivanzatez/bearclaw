@@ -108,11 +108,12 @@ bearclaw tmux stale                        # idle shells nothing is using
 
 ## Dashboard
 
-`bearclaw` on a terminal opens the dashboard: tabs for **Sessions · PRs · Tasks · Usage · Brain ·
-Notepad · Settings** (Tab / Shift-Tab, or tap the bar). Sessions is the live list; `d` opens one
+`bearclaw` on a terminal opens the dashboard: tabs for **Sessions · Claw · PRs · Tasks · Todo · Usage ·
+Brain · Notepad · Settings** (Tab / Shift-Tab, or tap the bar). Sessions is the live list; `d` opens one
 session up close (its screen, brief, and a line to send it a message). PRs and Usage are
 `bearclaw prs` / `bearclaw usage`; Tasks lists your open [Productive](https://productive.io)
-tasks; Notepad keeps your own text notes, edited in place. Keys per tab:
+tasks; Todo is the one-line work list sessions keep current; Claw is a chat with an operator
+Claude session that runs bearclaw for you; Notepad keeps your own text notes, edited in place. Keys per tab:
 [docs/cli.md → Dashboard keys](docs/cli.md#dashboard-keys-watch).
 
 ## Brain
