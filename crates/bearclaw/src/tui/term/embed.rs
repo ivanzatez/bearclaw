@@ -31,20 +31,18 @@ fn size(rows: u16, cols: u16) -> PtySize {
 }
 
 impl Embedded {
-    /// Attach to tmux session `target` on the default server. The session is set up to be
-    /// driven from here first: no status bar, no prefix key (every key belongs to the
-    /// program inside), mouse on for wheel scrolling.
+    /// Attach to tmux session `target` on the default server, set up first with
+    /// [`session_options`].
     pub fn attach(target: &str, rows: u16, cols: u16) -> Result<Embedded, String> {
-        let t = format!("={target}");
-        for (opt, val) in [("status", "off"), ("prefix", "None"), ("mouse", "on")] {
+        for args in session_options(target) {
             let _ = tmux_cmd()
-                .args(["set-option", "-t", &t, opt, val])
+                .args(&args)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
         }
         let mut cmd = CommandBuilder::new(crate::core::tools::tmux());
-        cmd.args(["-u", "attach-session", "-t", &t]);
+        cmd.args(["-u", "attach-session", "-t", &format!("={target}")]);
         Self::attach_cmd(cmd, rows, cols)
     }
 
@@ -138,6 +136,22 @@ impl Drop for Embedded {
     }
 }
 
+/// The `tmux set-option` calls that hand a session to the dashboard: no status bar, no
+/// prefix key (every key belongs to the program inside), mouse on for wheel scrolling.
+pub fn session_options(target: &str) -> Vec<Vec<String>> {
+    // `=name` alone is "no such session" here; the exact-match form takes a trailing colon.
+    let t = format!("={target}:");
+    [("status", "off"), ("prefix", "None"), ("mouse", "on")]
+        .into_iter()
+        .map(|(opt, val)| {
+            ["set-option", "-t", &t, opt, val]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
+        .collect()
+}
+
 fn color(c: vt100::Color) -> Color {
     match c {
         vt100::Color::Default => Color::Reset,
@@ -220,6 +234,58 @@ mod tests {
             .is_ok_and(|s| s.success())
     }
 
+    // `set-option -t =name` is "no such session" in tmux: the exact-match form needs `=name:`.
+    #[test]
+    fn session_options_apply_in_real_tmux() {
+        if std::process::Command::new("tmux")
+            .arg("-V")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let sock = format!("bearclaw-test-opt-{}", std::process::id());
+        assert!(tmux(
+            &sock,
+            &[
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "bearclaw-test-opt",
+                "cat"
+            ]
+        ));
+        let applied: Vec<bool> = session_options("bearclaw-test-opt")
+            .iter()
+            .map(|args| tmux(&sock, &args.iter().map(String::as_str).collect::<Vec<_>>()))
+            .collect();
+        let shown = std::process::Command::new("tmux")
+            .args(["-L", &sock, "show-options", "-t", "bearclaw-test-opt"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        kill(&sock);
+        assert_eq!(applied, [true, true, true]);
+        for want in ["status off", "prefix None", "mouse on"] {
+            assert!(shown.contains(want), "{shown}");
+        }
+    }
+
+    /// Kill the test server and remove its socket file (tmux leaves it behind).
+    fn kill(sock: &str) {
+        let path = std::process::Command::new("tmux")
+            .args(["-L", sock, "display-message", "-p", "#{socket_path}"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        tmux(sock, &["kill-server"]);
+        if !path.is_empty() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     fn text(e: &Embedded) -> String {
         e.parser.screen().contents()
     }
@@ -260,7 +326,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         let shown = text(&e);
-        tmux(&sock, &["kill-server"]);
+        kill(&sock);
         assert!(shown.contains("hello"), "{shown:?}");
         e.resize(10, 40);
         let until = Instant::now() + Duration::from_secs(5);

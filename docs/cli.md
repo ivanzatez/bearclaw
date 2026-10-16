@@ -243,12 +243,18 @@ carries `⏸N` while N sessions wait for you, so it shows from every tab. Sessio
 notifications keep running whichever tab is up. On every other tab `q` quits and Esc goes back to
 Sessions; keys of their own are listed per tab below.
 
+Opening a tmux session sets three of its tmux options so it can be driven from here:
+`status off`, `prefix None` (Ctrl+B and every other key reach the program inside) and `mouse on`.
+New sessions run the `claude` config value as their command — set it to add flags, e.g.
+`bearclaw config set claude '"claude --dangerously-skip-permissions"'`.
+
 Sessions tab:
 
 | key | does |
 | --- | --- |
-| `1`–`9`, `0` | jump to that row and focus it |
-| Enter, space, `l`, `o` (and Ctrl-J) | focus the selected session's pane/tab |
+| `1`–`9`, `0` | jump to that row and open it |
+| Enter, space, `l`, `o` (and Ctrl-J) | open the selected session: a **tmux** session opens *inside* the dashboard (a real terminal under the tab bar — every key, paste and wheel scroll goes to it; **Ctrl+]** comes back to the list, the session keeps running); an iTerm session gets its tab focused |
+| `c` | start a new Claude session in tmux — asks for the directory (prefilled with this host's first `spawnDirs` entry, else the current one), launches the configured `claude` command there and opens it inside |
 | ↑/↓, `k`/`j`, scroll | move the selection |
 | click / tap | select + focus (`--no-mouse` to disable) |
 | `d`, → | open the selected session up close: its cwd, brief (summary + open todos) and the bottom of its screen (re-read every 2 s); there `s` sends it a line (Enter sends, Esc cancels), Enter/`o` focuses it, `r` re-reads, Esc/← goes back to the list |

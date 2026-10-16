@@ -8,12 +8,13 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEventKind, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -38,8 +39,11 @@ use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
 use crate::tui::notify::notify;
 use crate::tui::tabs::editor::{Editor, EditorOutcome};
+use crate::tui::tabs::input::{InputResult, LineInput};
 use crate::tui::tabs::session::{DetailOutcome, SessionDetail};
 use crate::tui::tabs::{self, Outcome, Tab, Tabs};
+use crate::tui::term::embed::Embedded;
+use crate::tui::term::keys as term_keys;
 
 const EVENT_CAP: usize = 20;
 
@@ -252,7 +256,12 @@ impl Drop for TermGuard {
         if self.mouse {
             let _ = execute!(io::stdout(), DisableMouseCapture);
         }
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen,
+            Show
+        );
         let _ = disable_raw_mode();
     }
 }
@@ -312,6 +321,20 @@ struct Dash {
     detail: Option<SessionDetail>,
     /// `Some` while a file is open in the editor, over whichever tab asked for it.
     editor: Option<Editor>,
+    /// `Some` while a tmux session is open inside the dashboard (Sessions tab).
+    term: Option<Term>,
+    /// Where the open terminal was last drawn — mouse wheel coordinates are relative to it.
+    term_area: Rect,
+    /// `c`: the directory prompt for a new session.
+    new_session: Option<LineInput>,
+    /// A new session being started in the background: its tmux session name, or why not.
+    spawning: Option<Receiver<std::result::Result<String, String>>>,
+}
+
+/// A tmux session drawn inside the dashboard.
+struct Term {
+    session: String,
+    embed: Embedded,
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -714,6 +737,8 @@ fn run_tui(o: WatchOpts) -> Result<()> {
     if mouse {
         execute!(io::stdout(), EnableMouseCapture).map_err(Error::Io)?;
     }
+    // A paste arrives whole, so a multi-line one can't press Enter in a session line by line.
+    execute!(io::stdout(), EnableBracketedPaste).map_err(Error::Io)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout())).map_err(Error::Io)?;
 
     let mut state = load_state();
@@ -740,6 +765,10 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         tab_hits: Vec::new(),
         detail: None,
         editor: None,
+        term: None,
+        term_area: Rect::default(),
+        new_session: None,
+        spawning: None,
     };
     let mut tabs = Tabs::new();
     let mut naming = Naming::new(&loaded.cfg.naming);
@@ -827,6 +856,25 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         clamp_offset(&mut dash, rows.len());
 
         tabs.tick_all();
+        if let Some(t) = dash.term.as_mut() {
+            t.embed.pump();
+        }
+        if let Some(rx) = &dash.spawning
+            && let Ok(result) = rx.try_recv()
+        {
+            dash.spawning = None;
+            match result {
+                Ok(session) => {
+                    open_tmux(&session, &mut dash, &mut log);
+                    // The new session should show up in the list right away.
+                    last_poll = None;
+                }
+                Err(e) => {
+                    log.insert(0, Ev::now("✕", format!("new session: {e}")));
+                    log.truncate(EVENT_CAP);
+                }
+            }
+        }
         if let Some(d) = dash.detail.as_mut()
             && let Some(msg) = d.tick(&rows)
         {
@@ -848,7 +896,13 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             })
             .map_err(Error::Io)?;
 
-        if !event::poll(Duration::from_millis(250)).map_err(Error::Io)? {
+        // A live terminal redraws at screen pace; the dashboard alone is calmer.
+        let wait = if dash.term.is_some() || dash.spawning.is_some() {
+            16
+        } else {
+            250
+        };
+        if !event::poll(Duration::from_millis(wait)).map_err(Error::Io)? {
             continue;
         }
         let ev = event::read().map_err(Error::Io)?;
@@ -902,6 +956,60 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 // Whatever was edited is re-read when its tab shows again.
                 let active = tabs.active;
                 tabs.switch(active);
+            }
+            continue;
+        }
+
+        // The open terminal owns the Sessions tab: every key goes into it except Ctrl+].
+        if tabs.active == Tab::Sessions
+            && let Some(t) = dash.term.as_mut()
+        {
+            match &ev {
+                Event::Key(k) if k.kind != KeyEventKind::Release => {
+                    if term_keys::is_leave(*k) || !t.embed.alive() {
+                        dash.term = None;
+                    } else if let Some(bytes) = term_keys::encode(*k) {
+                        t.embed.write(&bytes);
+                    }
+                }
+                Event::Paste(text) => t.embed.write(&term_keys::paste(text)),
+                Event::Mouse(m) => match m.kind {
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                        let a = dash.term_area;
+                        let up = m.kind == MouseEventKind::ScrollUp;
+                        t.embed.write(&term_keys::wheel(
+                            up,
+                            m.column.saturating_sub(a.x),
+                            m.row.saturating_sub(a.y),
+                        ));
+                    }
+                    MouseEventKind::Down(MouseButton::Left) if m.row == 0 => {
+                        if let Some(to) = tabs::hit(&dash.tab_hits, m.column) {
+                            tabs.switch(to);
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(input) = dash.new_session.as_mut() {
+            if let Event::Key(k) = ev
+                && k.kind != KeyEventKind::Release
+            {
+                match input.key(k) {
+                    InputResult::Editing => {}
+                    InputResult::Cancel => dash.new_session = None,
+                    InputResult::Quit => break,
+                    InputResult::Submit(dir) => {
+                        dash.new_session = None;
+                        let dir = crate::core::tools::expand_tilde(dir.trim());
+                        log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
+                        log.truncate(EVENT_CAP);
+                        dash.spawning = Some(spawn_in_tmux(dir));
+                    }
+                }
             }
             continue;
         }
@@ -987,14 +1095,6 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             _ => Action::None,
         };
 
-        let focus = |idx: usize, log: &mut Vec<Ev>| {
-            if let Some(r) = rows.get(idx)
-                && let Err(e) = backend::focus(r)
-            {
-                log.insert(0, Ev::now("✕", format!("focus failed: {e}")));
-            }
-        };
-
         match action {
             Action::None => {}
             // Esc doubles as "close the overlay" before it means "quit".
@@ -1012,6 +1112,11 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 }
             }
             Action::ToggleHelp => dash.help = !dash.help,
+            Action::NewSession => {
+                let mut input = LineInput::new("new session in");
+                input.buf = default_session_dir();
+                dash.new_session = Some(input);
+            }
             Action::Detail => {
                 if let Some(r) = rows.get(sel) {
                     dash.detail = Some(SessionDetail::open(r.key()));
@@ -1040,11 +1145,16 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 selected = Some(rows[(sel + 1).min(rows.len() - 1)].key());
             }
             Action::Up | Action::Down => {}
-            Action::Focus => focus(sel, &mut log),
+            Action::Focus => {
+                if let Some(r) = rows.get(sel).cloned() {
+                    open_session(&r, &mut dash, &mut log);
+                }
+            }
             // Digit and tap indices are raw — re-clamp before trusting them.
             Action::JumpTo(idx) if idx < rows.len() => {
                 selected = Some(rows[idx].key());
-                focus(idx, &mut log);
+                let r = rows[idx].clone();
+                open_session(&r, &mut dash, &mut log);
             }
             Action::JumpTo(_) => {}
             // Suggest-and-confirm, never auto-apply: `N` generates, the pinned
@@ -1117,6 +1227,84 @@ fn clamp_offset(dash: &mut Dash, len: usize) {
 
 // --- drawing -----------------------------------------------------------------
 
+/// Enter on a session: one in tmux opens inside the dashboard; anything else (iTerm, or a
+/// tmux session that won't attach) gets its own terminal focused, as before.
+fn open_session(r: &Session, dash: &mut Dash, log: &mut Vec<Ev>) {
+    if r.backend == crate::core::discovery::Backend::Tmux
+        && !is_fixture()
+        && let Some(ts) = r.tmux_session.clone()
+        && open_tmux(&ts, dash, log)
+    {
+        return;
+    }
+    if let Err(e) = backend::focus(r) {
+        log.insert(0, Ev::now("✕", format!("focus failed: {e}")));
+        log.truncate(EVENT_CAP);
+    }
+}
+
+/// Attach the dashboard to tmux session `ts`. False (with a log line) when it can't.
+fn open_tmux(ts: &str, dash: &mut Dash, log: &mut Vec<Ev>) -> bool {
+    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    match Embedded::attach(ts, rows.saturating_sub(2), cols) {
+        Ok(embed) => {
+            dash.term = Some(Term {
+                session: ts.to_string(),
+                embed,
+            });
+            true
+        }
+        Err(e) => {
+            log.insert(0, Ev::now("✕", format!("open {ts}: {e}")));
+            log.truncate(EVENT_CAP);
+            false
+        }
+    }
+}
+
+/// Where `c` offers to start: this host's first spawn dir, else the current directory.
+fn default_session_dir() -> String {
+    let cfg = crate::core::config::get();
+    cfg.spawn_dirs_for(&cfg.self_name())
+        .into_iter()
+        .next()
+        .map(|(_, path)| path)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|d| d.display().to_string())
+        })
+        .map(|d| crate::core::tools::tildify(&d))
+        .unwrap_or_default()
+}
+
+/// Start Claude (the configured launcher) in a new tmux session in `dir`, off the UI thread.
+fn spawn_in_tmux(dir: String) -> Receiver<std::result::Result<String, String>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        use crate::core::harness::Harness;
+        let result = if !std::path::Path::new(&dir).is_dir() {
+            Err(format!("no such directory: {dir}"))
+        } else {
+            backend::spawn_tagged(
+                crate::core::discovery::Backend::Tmux,
+                &dir,
+                backend::Prompt::None,
+                None,
+                None,
+                false,
+                &Harness::Claude.command(),
+                Harness::Claude,
+                None,
+            )
+            .map_err(|e| e.to_string())
+            .and_then(|(_, ts)| ts.ok_or_else(|| "tmux gave no session name".to_string()))
+        };
+        let _ = tx.send(result);
+    });
+    rx
+}
+
 /// Row 0 is the tab bar; the rest is the Sessions dashboard or the active tab's view.
 #[allow(clippy::too_many_arguments)]
 fn draw_app(
@@ -1144,6 +1332,26 @@ fn draw_app(
         ed.draw(f, body);
         return;
     }
+    if tabs.active == Tab::Sessions
+        && let Some(t) = dash.term.as_mut()
+    {
+        dash.list_area = Rect::default();
+        let [head, screen] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
+        let status = if t.embed.alive() {
+            format!(" ⧉ {} · ctrl+] back to the list ", t.session)
+        } else {
+            format!(" ⧉ {} · the session ended — any key to go back ", t.session)
+        };
+        f.render_widget(
+            Paragraph::new(Line::styled(status, Style::default().fg(Color::DarkGray))),
+            head,
+        );
+        t.embed.resize(screen.height, screen.width);
+        t.embed.draw(f.buffer_mut(), screen);
+        dash.term_area = screen;
+        return;
+    }
     let active = tabs.active;
     match tabs.view(active) {
         Some(v) => {
@@ -1151,7 +1359,14 @@ fn draw_app(
             dash.list_area = Rect::default();
             v.draw(f, body);
         }
-        None => draw_in(f, body, rows, log, sel, renaming, o, dash),
+        None => {
+            draw_in(f, body, rows, log, sel, renaming, o, dash);
+            if let Some(input) = &dash.new_session {
+                let line = Rect::new(body.x, body.y, body.width, 1);
+                f.render_widget(Clear, line);
+                input.draw(f, line);
+            }
+        }
     }
 }
 
@@ -1569,11 +1784,13 @@ fn render_events(f: &mut ratatui::Frame, area: Rect, log: &[Ev], plan: &Plan) {
 }
 
 fn render_help(f: &mut ratatui::Frame) {
-    const BINDS: [(&str, &str); 14] = [
+    const BINDS: [(&str, &str); 16] = [
         ("Tab ⇧Tab", "switch tab (also ⇧← ⇧→, or tap)"),
         ("d →", "open a session: screen, brief, send"),
         ("1-9 0", "jump to that row and focus it"),
-        ("⏎ ␣ l o", "focus the selected session"),
+        ("⏎ ␣ l o", "open it (tmux: inside here)"),
+        ("ctrl+]", "back from an open session"),
+        ("c", "start a new session"),
         ("↑↓ jk", "move the selection"),
         ("tap", "select + focus (mouse/touch)"),
         ("n", "rename the selected session"),
@@ -1672,6 +1889,10 @@ mod tests {
             tab_hits: Vec::new(),
             detail: None,
             editor: None,
+            term: None,
+            term_area: Rect::default(),
+            new_session: None,
+            spawning: None,
         }
     }
 
@@ -1779,19 +2000,58 @@ mod tests {
     }
 
     fn app_screen(w: u16, h: u16, tabs: &mut Tabs, rows: &[Session]) -> Vec<String> {
+        app_screen_with(w, h, tabs, rows, &mut test_dash())
+    }
+
+    fn app_screen_with(
+        w: u16,
+        h: u16,
+        tabs: &mut Tabs,
+        rows: &[Session],
+        dash: &mut Dash,
+    ) -> Vec<String> {
         let o = WatchOpts {
             interval_secs: 5,
             stuck_secs: 300,
             ..Default::default()
         };
-        let mut dash = test_dash();
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
-        t.draw(|f| draw_app(f, tabs, rows, &[], 0, None, &o, &mut dash))
+        t.draw(|f| draw_app(f, tabs, rows, &[], 0, None, &o, dash))
             .unwrap();
         let buf = t.backend().buffer().clone();
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn embedded_terminal_fills_the_body() {
+        // Still running when drawn: the header offers the way back, not "ended".
+        let mut cmd = portable_pty::CommandBuilder::new("sh");
+        cmd.args(["-c", "printf 'hello from pty'; sleep 5"]);
+        let mut embed = Embedded::attach_cmd(cmd, 10, 60).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !embed.parser.screen().contents().contains("hello from pty") && Instant::now() < until
+        {
+            embed.pump();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let rows = fixture();
+        let mut tabs = Tabs::new();
+        let mut dash = test_dash();
+        dash.term = Some(Term {
+            session: "demo".into(),
+            embed,
+        });
+        let s = app_screen_with(120, 20, &mut tabs, &rows, &mut dash);
+        assert!(s[0].contains("Sessions"), "{:?}", s[0]);
+        assert!(
+            s[1].contains("demo") && s[1].contains("ctrl+]"),
+            "{:?}",
+            s[1]
+        );
+        assert!(s[2].contains("hello from pty"), "{s:?}");
+        assert!(!s.join("\n").contains("3 live"), "{s:?}");
     }
 
     #[test]

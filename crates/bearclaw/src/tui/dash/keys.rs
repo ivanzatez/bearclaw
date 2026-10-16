@@ -26,6 +26,8 @@ pub enum Action {
     Rename,
     /// Open the selected session up close: screen, brief, send.
     Detail,
+    /// Start a new session (asks for its directory).
+    NewSession,
     ToggleHelp,
     /// 1-row ⇄ 2-row items.
     ToggleRows,
@@ -116,6 +118,7 @@ pub fn action(k: KeyEvent) -> Action {
         KeyCode::Char('r') => Action::Refresh,
         KeyCode::Char('n') => Action::Rename,
         KeyCode::Char('d') | KeyCode::Right => Action::Detail,
+        KeyCode::Char('c') => Action::NewSession,
         KeyCode::Char('N') => Action::SuggestName,
         KeyCode::Char('?') => Action::ToggleHelp,
         KeyCode::Char('z') => Action::ToggleRows,
@@ -170,6 +173,11 @@ mod tests {
     }
     fn ctrl(c: char) -> Action {
         action(key(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    #[test]
+    fn c_opens_new_session() {
+        assert_eq!(bare(KeyCode::Char('c')), Action::NewSession);
     }
 
     #[test]
