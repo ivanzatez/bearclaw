@@ -20,6 +20,7 @@ pub mod snapshot;
 pub mod stack;
 pub mod title;
 pub mod tmux;
+pub mod todo;
 pub mod tools;
 pub mod usage;
 pub mod webapi;
