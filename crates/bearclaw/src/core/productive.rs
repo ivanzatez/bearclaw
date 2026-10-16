@@ -69,18 +69,25 @@ pub struct Task {
     pub url: String,
     /// The description as plain text.
     pub description: String,
+    pub assignee_id: Option<String>,
+    /// Where the status sits on the board: (category — not started, started, closed —, position).
+    pub status_rank: (u8, i64),
 }
 
 fn rel_id<'a>(item: &'a Value, rel: &str) -> Option<&'a str> {
     item["relationships"][rel]["data"]["id"].as_str()
 }
 
-fn included_name<'a>(v: &'a Value, kind: &str, id: &str) -> Option<&'a str> {
+fn included<'a>(v: &'a Value, kind: &str, id: &str) -> Option<&'a Value> {
     v["included"]
         .as_array()?
         .iter()
-        .find(|i| i["type"] == kind && i["id"] == id)?["attributes"]["name"]
-        .as_str()
+        .find(|i| i["type"] == kind && i["id"] == id)
+        .map(|i| &i["attributes"])
+}
+
+fn included_name<'a>(v: &'a Value, kind: &str, id: &str) -> Option<&'a str> {
+    included(v, kind, id)?["name"].as_str()
 }
 
 /// `(person id, organisation name)` of your membership in `org_id`.
@@ -124,6 +131,15 @@ pub fn parse_tasks(v: &Value, task_url_base: &str) -> Vec<Task> {
                 updated_at: s("updated_at"),
                 url: format!("{task_url_base}/tasks/{id}"),
                 description: html_to_text(a["description"].as_str().unwrap_or("")),
+                assignee_id: rel_id(t, "assignee").map(str::to_string),
+                status_rank: rel_id(t, "workflow_status")
+                    .and_then(|i| included(v, "workflow_statuses", i))
+                    .map_or((0, 0), |s| {
+                        (
+                            s["category_id"].as_u64().unwrap_or(0) as u8,
+                            s["position"].as_i64().unwrap_or(0),
+                        )
+                    }),
                 id,
             }
         })
@@ -177,6 +193,40 @@ pub fn html_to_text(html: &str) -> String {
         }
     }
     text.trim().to_string()
+}
+
+/// Only the tasks really assigned to `person`: the API's assignee filter reads a search index
+/// that lags, so a task handed to someone else can still come back for a while.
+pub fn assigned_to(tasks: Vec<Task>, person: &str) -> Vec<Task> {
+    tasks
+        .into_iter()
+        .filter(|t| t.assignee_id.as_deref() == Some(person))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grouping {
+    /// By workflow status, in board order.
+    Status,
+    /// By project, alphabetically.
+    Project,
+}
+
+/// Group names with the indices of their tasks (task order kept within a group).
+pub fn group(tasks: &[Task], by: Grouping) -> Vec<(String, Vec<usize>)> {
+    let mut groups: Vec<(String, (u8, i64), Vec<usize>)> = Vec::new();
+    for (i, t) in tasks.iter().enumerate() {
+        let (name, rank) = match by {
+            Grouping::Status => (&t.status, t.status_rank),
+            Grouping::Project => (&t.project, (0, 0)),
+        };
+        match groups.iter_mut().find(|g| &g.0 == name) {
+            Some(g) => g.2.push(i),
+            None => groups.push((name.clone(), rank, vec![i])),
+        }
+    }
+    groups.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    groups.into_iter().map(|(n, _, idx)| (n, idx)).collect()
 }
 
 /// Due date ascending (no date last), then most recently updated first.
@@ -246,6 +296,10 @@ fn api_get(s: &Settings, token: &str, path: &str) -> Result<Value, String> {
 /// The API leaves a membership's person linkage null unless it is included.
 const MEMBERSHIPS_PATH: &str = "/organization_memberships?include=person,organization";
 
+/// Open tasks filtered to an assignee (`{person}`), with what the rows show and the assignee
+/// to double-check against.
+const TASKS_QUERY: &str = "/tasks?filter[assignee_id]={person}&filter[status]=1&include=project,workflow_status,assignee&page[size]=200";
+
 /// Your open tasks in the configured organisation, sorted by [`sort_tasks`].
 pub fn my_open_tasks(s: &Settings) -> Result<Vec<Task>, String> {
     let token = std::env::var(&s.token_env)
@@ -256,14 +310,8 @@ pub fn my_open_tasks(s: &Settings) -> Result<Vec<Task>, String> {
     let (person, org_name) = parse_membership(&m, &s.org_id)
         .ok_or_else(|| format!("this token has no membership in organization {}", s.org_id))?;
     let base = format!("{}/{}-{}", s.app_url, s.org_id, slugify(&org_name));
-    let v = api_get(
-        s,
-        &token,
-        &format!(
-            "/tasks?filter[assignee_id]={person}&filter[status]=1&include=project,workflow_status&page[size]=200"
-        ),
-    )?;
-    let mut tasks = parse_tasks(&v, &base);
+    let v = api_get(s, &token, &TASKS_QUERY.replace("{person}", &person))?;
+    let mut tasks = assigned_to(parse_tasks(&v, &base), &person);
     sort_tasks(&mut tasks);
     Ok(tasks)
 }
@@ -344,6 +392,65 @@ mod tests {
     #[test]
     fn memberships_are_fetched_with_their_person() {
         assert!(MEMBERSHIPS_PATH.contains("include=person,organization"));
+    }
+
+    #[test]
+    fn tasks_assigned_elsewhere_are_dropped() {
+        let v = json!({
+            "data": [
+                {"id":"1","type":"tasks","attributes":{"title":"mine"},
+                 "relationships":{"assignee":{"data":{"type":"people","id":"p42"}},
+                   "workflow_status":{"data":{"type":"workflow_statuses","id":"9"}}}},
+                {"id":"2","type":"tasks","attributes":{"title":"moved on"},
+                 "relationships":{"assignee":{"data":{"type":"people","id":"p7"}}}},
+                {"id":"3","type":"tasks","attributes":{"title":"unassigned"},
+                 "relationships":{"assignee":{"data":null}}}
+            ],
+            "included": [{"id":"9","type":"workflow_statuses",
+                          "attributes":{"name":"Working","category_id":2,"position":4}}]
+        });
+        let tasks = parse_tasks(&v, "https://app.example/x");
+        assert_eq!(tasks[0].assignee_id.as_deref(), Some("p42"));
+        assert_eq!(tasks[0].status_rank, (2, 4));
+        let mine = assigned_to(tasks, "p42");
+        let ids: Vec<&str> = mine.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["1"]);
+        // The search index lags: a task API returns for the filter can be someone else's now.
+        assert!(TASKS_QUERY.contains("include=project,workflow_status,assignee"));
+    }
+
+    #[test]
+    fn groups_follow_the_board_order() {
+        let t = |id: &str, status: &str, rank: (u8, i64), project: &str| Task {
+            id: id.into(),
+            status: status.into(),
+            status_rank: rank,
+            project: project.into(),
+            ..Default::default()
+        };
+        let tasks = vec![
+            t("a", "Working", (2, 4), "Web"),
+            t("b", "Triage", (1, 1), "Api"),
+            t("c", "Peer Review", (2, 6), "Web"),
+            t("d", "Working", (2, 4), "Api"),
+        ];
+        let by_status: Vec<(String, Vec<usize>)> = group(&tasks, Grouping::Status);
+        assert_eq!(
+            by_status,
+            vec![
+                ("Triage".to_string(), vec![1]),
+                ("Working".to_string(), vec![0, 3]),
+                ("Peer Review".to_string(), vec![2]),
+            ]
+        );
+        let by_project = group(&tasks, Grouping::Project);
+        assert_eq!(
+            by_project,
+            vec![
+                ("Api".to_string(), vec![1, 3]),
+                ("Web".to_string(), vec![0, 2])
+            ]
+        );
     }
 
     #[test]

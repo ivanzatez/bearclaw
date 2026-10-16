@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
@@ -14,13 +14,15 @@ use super::loader::Loader;
 use super::pager::Pager;
 use super::{Outcome, View, common_key};
 use crate::cli::render::{column, fit};
-use crate::core::productive::{self, Task};
+use crate::core::productive::{self, Grouping, Task};
 use crate::core::tools::open_url;
 
 const TTL: Duration = Duration::from_secs(120);
 
 pub struct TasksView {
     pub(crate) load: Loader<Vec<Task>>,
+    grouping: Grouping,
+    /// Position in [`TasksView::order`] — the tasks as listed, group by group.
     sel: usize,
     list: ListState,
     pager: Option<Pager>,
@@ -49,6 +51,7 @@ impl TasksView {
     pub fn new() -> Self {
         TasksView {
             load: Loader::new(),
+            grouping: Grouping::Status,
             sel: 0,
             list: ListState::default(),
             pager: None,
@@ -64,7 +67,21 @@ impl TasksView {
         self.load.data.as_deref().unwrap_or(&[])
     }
 
-    fn row(t: &Task, width: usize, today: NaiveDate) -> Line<'static> {
+    fn groups(&self) -> Vec<(String, Vec<usize>)> {
+        productive::group(self.tasks(), self.grouping)
+    }
+
+    /// Task indices in the order they are listed: group after group.
+    fn order(&self) -> Vec<usize> {
+        self.groups().into_iter().flat_map(|(_, idx)| idx).collect()
+    }
+
+    pub fn selected_task(&self) -> Option<&Task> {
+        self.order().get(self.sel).map(|&i| &self.tasks()[i])
+    }
+
+    /// The column the grouping already says is left out of the row.
+    fn row(t: &Task, width: usize, today: NaiveDate, grouping: Grouping) -> Line<'static> {
         let num = format!(" {} ", column(&format!("#{}", t.number), 6));
         let (due, due_color) = due_cell(t.due_date.as_deref(), today);
         let due = format!(" {} ", column(&due, 6));
@@ -73,6 +90,10 @@ impl TasksView {
             w if w >= 90 => (20, 14),
             w if w >= 64 => (0, 14),
             _ => (0, 0),
+        };
+        let (project_w, status_w) = match grouping {
+            Grouping::Status => (project_w.max(status_w).min(20), 0),
+            Grouping::Project => (0, status_w),
         };
         let title_w = width.saturating_sub(6 + 2 + 6 + 2 + project_w + status_w + 2);
         let mut spans = vec![
@@ -96,7 +117,7 @@ impl TasksView {
     }
 
     fn open(&mut self) {
-        let Some(t) = self.tasks().get(self.sel) else {
+        let Some(t) = self.selected_task() else {
             return;
         };
         let text = format!(
@@ -149,7 +170,7 @@ impl View for TasksView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ⏎ read · o open · r refresh · esc back ",
+                " ⏎ read · o open · g group by status/project · r refresh · esc back ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
@@ -172,12 +193,36 @@ impl View for TasksView {
         }
         let today = chrono::Local::now().date_naive();
         let width = inner.width as usize;
-        let items: Vec<ListItem> = self
-            .tasks()
-            .iter()
-            .map(|t| ListItem::new(Self::row(t, width, today)))
-            .collect();
-        self.list.select(Some(self.sel));
+        let header = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let mut items: Vec<ListItem> = Vec::new();
+        let mut selected_row = 0;
+        let mut listed = 0;
+        for (name, idx) in self.groups() {
+            let name = if name.is_empty() {
+                "—".to_string()
+            } else {
+                name
+            };
+            items.push(ListItem::new(Line::styled(
+                format!(" {name} · {}", idx.len()),
+                header,
+            )));
+            for i in idx {
+                if listed == self.sel {
+                    selected_row = items.len();
+                }
+                listed += 1;
+                items.push(ListItem::new(Self::row(
+                    &self.tasks()[i],
+                    width,
+                    today,
+                    self.grouping,
+                )));
+            }
+        }
+        self.list.select(Some(selected_row));
         let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
         f.render_stateful_widget(list, inner, &mut self.list);
     }
@@ -201,9 +246,16 @@ impl View for TasksView {
             }
             KeyCode::Up | KeyCode::Char('k') => self.sel = self.sel.saturating_sub(1),
             KeyCode::Char('r') => self.fetch(),
+            KeyCode::Char('g') => {
+                self.grouping = match self.grouping {
+                    Grouping::Status => Grouping::Project,
+                    Grouping::Project => Grouping::Status,
+                };
+                self.sel = 0;
+            }
             KeyCode::Enter => self.open(),
             KeyCode::Char('o') => {
-                if let Some(t) = self.tasks().get(self.sel)
+                if let Some(t) = self.selected_task()
                     && let Err(e) = open_url(&t.url)
                 {
                     return Outcome::Log(e);
@@ -241,6 +293,42 @@ mod tests {
         assert_eq!(v.key(j), Outcome::None);
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(v.key(enter), Outcome::None);
+    }
+
+    #[test]
+    fn tasks_are_grouped_under_their_status() {
+        let t = |n: &str, status: &str, rank: (u8, i64), project: &str| Task {
+            id: n.into(),
+            number: n.into(),
+            title: format!("task {n}"),
+            status: status.into(),
+            status_rank: rank,
+            project: project.into(),
+            ..Default::default()
+        };
+        let mut v = TasksView::new();
+        v.load.data = Some(vec![
+            t("1", "Working", (2, 4), "Web"),
+            t("2", "Triage", (1, 1), "Api"),
+            t("3", "Working", (2, 4), "Api"),
+        ]);
+        let s = screen(&mut v, 100, 12);
+        assert!(s.contains("Triage · 1") && s.contains("Working · 2"), "{s}");
+        assert!(
+            s.find("Triage ·").unwrap() < s.find("Working ·").unwrap(),
+            "{s}"
+        );
+        let n = |v: &TasksView| v.selected_task().map(|t| t.number.clone());
+        assert_eq!(n(&v).as_deref(), Some("2"));
+        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        v.key(j);
+        assert_eq!(n(&v).as_deref(), Some("1"));
+        v.key(j);
+        v.key(j);
+        assert_eq!(n(&v).as_deref(), Some("3"));
+        v.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let p = screen(&mut v, 100, 12);
+        assert!(p.contains("Api · 2") && p.contains("Web · 1"), "{p}");
     }
 
     #[test]

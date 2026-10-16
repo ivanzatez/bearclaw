@@ -279,7 +279,7 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 | Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |
 | Settings | one page: config file, web server (and whether it answers), brain folder and hook, Productive org and token, spawn dirs, repos, PR scope · `e` edits the config, re-read on return |
 | Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
-| Tasks | your open [Productive](https://productive.io) tasks, due date first (overdue red) · Enter read · `o` open in the browser |
+| Tasks | your open [Productive](https://productive.io) tasks — only those assigned to you right now (each task's assignee is checked: the API's assignee filter lags) — grouped by workflow status in board order (`g` switches to grouping by project), due date first within a group (overdue red) · Enter read · `o` open in the browser |
 
 The Tasks tab reads `productive.organizationId` (required — `bearclaw config set productive.organizationId '"<id>"'`),
 `productive.tokenEnv` (the env var holding your API token, default `PRODUCTIVE_AUTH_TOKEN`), and
