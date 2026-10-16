@@ -329,6 +329,8 @@ struct Dash {
     term_area: Rect,
     /// `c`: the directory prompt for a new session.
     new_session: Option<LineInput>,
+    /// Sessions' todo lines and sticky notes, by session id.
+    notes: HashMap<String, SessionNote>,
     /// A new session being started in the background: its tmux session name, or why not.
     spawning: Option<Receiver<std::result::Result<String, String>>>,
 }
@@ -336,7 +338,34 @@ struct Dash {
 /// A tmux session drawn inside the dashboard.
 struct Term {
     session: String,
+    /// Its Claude session id, when it was opened from the list — for its todo line.
+    id: Option<String>,
     embed: Embedded,
+}
+
+/// What a session keeps about itself for the dashboard: its todo line and sticky note.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SessionNote {
+    todo: Option<String>,
+    bullets: Vec<String>,
+}
+
+/// Every listed session's note, read once per poll (two small files, not per frame).
+fn load_notes(rows: &[Session]) -> HashMap<String, SessionNote> {
+    let todo = crate::core::todo::load(&crate::core::todo::path()).unwrap_or_default();
+    let dir = crate::core::sticky::dir();
+    rows.iter()
+        .filter_map(|r| {
+            let id = r.session_id.as_ref()?;
+            let note = SessionNote {
+                todo: todo.doing_for(id).map(|i| i.text.clone()),
+                bullets: crate::core::sticky::get(&dir, id)
+                    .map(|s| s.bullets)
+                    .unwrap_or_default(),
+            };
+            (note != SessionNote::default()).then(|| (id.clone(), note))
+        })
+        .collect()
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -771,6 +800,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         term: None,
         term_area: Rect::default(),
         new_session: None,
+        notes: HashMap::new(),
         spawning: None,
     };
     let mut tabs = Tabs::new();
@@ -849,6 +879,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             log.truncate(EVENT_CAP);
             last_poll = Some(Instant::now());
             dash.dormant = crate::core::snapshot::dormant_count();
+            dash.notes = load_notes(&rows);
             // New sessions get a title, and a session whose first prompt has
             // landed since gets a better one. A no-op once the bearclaw is titled.
             naming.autotitle(&rows);
@@ -876,7 +907,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             dash.spawning = None;
             match result {
                 Ok(session) => {
-                    open_tmux(&session, &mut dash, &mut log);
+                    open_tmux(&session, None, &mut dash, &mut log);
                     // The new session should show up in the list right away.
                     last_poll = None;
                 }
@@ -1339,7 +1370,7 @@ fn open_session(r: &Session, dash: &mut Dash, log: &mut Vec<Ev>) {
     if r.backend == crate::core::discovery::Backend::Tmux
         && !is_fixture()
         && let Some(ts) = r.tmux_session.clone()
-        && open_tmux(&ts, dash, log)
+        && open_tmux(&ts, r.session_id.clone(), dash, log)
     {
         return;
     }
@@ -1349,13 +1380,15 @@ fn open_session(r: &Session, dash: &mut Dash, log: &mut Vec<Ev>) {
     }
 }
 
-/// Attach the dashboard to tmux session `ts`. False (with a log line) when it can't.
-fn open_tmux(ts: &str, dash: &mut Dash, log: &mut Vec<Ev>) -> bool {
+/// Attach the dashboard to tmux session `ts` (Claude session `id`, when known). False (with a
+/// log line) when it can't.
+fn open_tmux(ts: &str, id: Option<String>, dash: &mut Dash, log: &mut Vec<Ev>) -> bool {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     match Embedded::attach(ts, rows.saturating_sub(2), cols) {
         Ok(embed) => {
             dash.term = Some(Term {
                 session: ts.to_string(),
+                id,
                 embed,
             });
             true
@@ -1465,8 +1498,17 @@ fn draw_app(
         dash.list_area = Rect::default();
         let [head, screen] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
+        let doing =
+            t.id.as_ref()
+                .and_then(|id| dash.notes.get(id))
+                .and_then(|n| n.todo.as_deref())
+                .map(|line| format!(" · {line}"))
+                .unwrap_or_default();
         let status = if t.embed.alive() {
-            format!(" ⧉ {} · ctrl+l (or tap here) back to the list ", t.session)
+            format!(
+                " ⧉ {}{doing} · ctrl+l (or tap here) back to the list ",
+                t.session
+            )
         } else {
             format!(" ⧉ {} · the session ended — any key to go back ", t.session)
         };
@@ -1526,6 +1568,29 @@ fn draw_in(
     dash.tick = dash.tick.wrapping_add(1);
     let naming = dash.naming;
     let tick = dash.tick;
+    // The selected session's note: beside the list on a wide pane, below it on a narrow one
+    // (in the events pane's place), and only when there is one.
+    let note = rows
+        .get(sel)
+        .and_then(|r| Some((r, dash.notes.get(r.session_id.as_ref()?)?.clone())));
+    let (area, note_area, hide_events) = match &note {
+        Some(_) if area.width >= 120 => {
+            let [list, side] =
+                Layout::horizontal([Constraint::Min(0), Constraint::Length(46)]).areas(area);
+            (list, Some(side), false)
+        }
+        Some((_, n)) => {
+            let h = (n.bullets.len() as u16 + 3 + u16::from(n.todo.is_some())).min(9);
+            if area.height >= h + 8 {
+                let [top, bottom] =
+                    Layout::vertical([Constraint::Min(0), Constraint::Length(h)]).areas(area);
+                (top, Some(bottom), true)
+            } else {
+                (area, None, false)
+            }
+        }
+        None => (area, None, false),
+    };
     let longest = rows
         .iter()
         .map(|r| width_of(&r.headline()))
@@ -1542,6 +1607,7 @@ fn draw_in(
     // `e` overrides the height policy in both directions. Turning events on in a
     // pane too short for both hands them the whole thing below the header.
     let events_height = match dash.events {
+        _ if hide_events => 0,
         Some(false) => 0,
         Some(true) if plan.events_height == 0 => area.height.saturating_sub(1),
         _ => plan.events_height,
@@ -1581,6 +1647,9 @@ fn draw_in(
     } else {
         render_header(f, chunks[0], rows, o, &plan, (naming, dash.dormant), tick);
     }
+    if let (Some(a), Some((r, n))) = (note_area, &note) {
+        render_note(f, a, &r.headline(), n);
+    }
     if let Some(mut d) = dash.detail.take() {
         d.draw(f, chunks[1].union(chunks[2]), rows);
         dash.detail = Some(d);
@@ -1599,6 +1668,36 @@ fn draw_in(
         // straight through to the row underneath and focuses that terminal.
         dash.list_area = Rect::default();
     }
+}
+
+/// The selected session's todo line and sticky bullets, boxed.
+fn render_note(f: &mut ratatui::Frame, area: Rect, who: &str, n: &SessionNote) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(crate::cli::render::fit(
+            &format!(" Sticky · {who} "),
+            area.width.saturating_sub(2) as usize,
+        ));
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(t) = &n.todo {
+        lines.push(Line::styled(
+            format!("● {t}"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    for b in &n.bullets {
+        lines.push(Line::raw(format!("• {b}")));
+    }
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 /// Trim the events pane to what it actually has to show. An empty log used to
@@ -2020,6 +2119,7 @@ mod tests {
             term: None,
             term_area: Rect::default(),
             new_session: None,
+            notes: HashMap::new(),
             spawning: None,
         }
     }
@@ -2192,6 +2292,7 @@ mod tests {
         let mut dash = test_dash();
         dash.term = Some(Term {
             session: "demo".into(),
+            id: None,
             embed,
         });
         let s = app_screen_with(120, 20, &mut tabs, &rows, &mut dash);
@@ -2224,6 +2325,65 @@ mod tests {
         assert!(s[0].contains("Sessions ⏸1"), "{:?}", s[0]);
         assert!(s[1].contains(" PRs "), "{:?}", s[1]);
         assert!(!s.join("\n").contains("3 live"), "{s:?}");
+    }
+
+    fn noted_dash() -> Dash {
+        let mut dash = test_dash();
+        dash.notes.insert(
+            "bbbbbbbb-2222".into(),
+            SessionNote {
+                todo: Some("Permission error in the loader".into()),
+                bullets: vec!["Found the 403".into(), "Fixed the role hash".into()],
+            },
+        );
+        dash
+    }
+
+    fn screen_dash(w: u16, h: u16, rows: &[Session], dash: &mut Dash) -> Vec<String> {
+        let o = WatchOpts {
+            interval_secs: 5,
+            stuck_secs: 300,
+            ..Default::default()
+        };
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| draw(f, rows, &[], 0, None, &o, dash)).unwrap();
+        let buf = t.backend().buffer().clone();
+        (0..h)
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect()
+    }
+
+    #[test]
+    fn the_sticky_note_sits_beside_the_list_on_a_wide_pane() {
+        let rows = fixture();
+        let s = screen_dash(150, 30, &rows, &mut noted_dash());
+        let line = s
+            .iter()
+            .find(|l| l.contains("Found the 403"))
+            .expect("note drawn");
+        assert!(line.find("Found the 403").unwrap() > 100, "{line}");
+        let all = s.join("\n");
+        assert!(
+            all.contains("Permission error in the loader") && all.contains("docs-refresh"),
+            "{all}"
+        );
+        // Nothing noted, nothing taken from the list.
+        let plain = screen_dash(150, 30, &rows, &mut test_dash()).join("\n");
+        assert!(!plain.contains("Sticky"), "{plain}");
+    }
+
+    #[test]
+    fn on_a_narrow_pane_the_note_goes_below_the_list() {
+        let rows = fixture();
+        let s = screen_dash(80, 30, &rows, &mut noted_dash());
+        let all = s.join("\n");
+        assert!(
+            all.contains("Found the 403") && all.contains("docs-refresh"),
+            "{all}"
+        );
+        let note_row = s.iter().position(|l| l.contains("Found the 403")).unwrap();
+        let list_row = s.iter().position(|l| l.contains("docs-refresh")).unwrap();
+        assert!(note_row > list_row, "{all}");
     }
 
     #[test]
