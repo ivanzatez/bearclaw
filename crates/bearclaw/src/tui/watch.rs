@@ -317,6 +317,8 @@ struct Dash {
     dormant: usize,
     /// Each tab's columns on the bar (row 0), recorded on every draw for clicks.
     tab_hits: Vec<(Tab, u16, u16)>,
+    /// The refresh button's `[x0, x1)` on the bar, when it fit.
+    refresh_hit: Option<(u16, u16)>,
     /// `Some` while one session is open up close (`d`), in place of the list.
     detail: Option<SessionDetail>,
     /// `Some` while a file is open in the editor, over whichever tab asked for it.
@@ -763,6 +765,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         tick: 0,
         dormant: 0,
         tab_hits: Vec::new(),
+        refresh_hit: None,
         detail: None,
         editor: None,
         term: None,
@@ -1027,6 +1030,22 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         dash.spawning = Some(spawn_in_tmux(dir));
                     }
                 }
+            }
+            continue;
+        }
+
+        // The bar's refresh button: the active tab fetches now; Sessions re-polls.
+        if let Event::Mouse(m) = &ev
+            && m.kind == MouseEventKind::Down(MouseButton::Left)
+            && m.row == 0
+            && dash
+                .refresh_hit
+                .is_some_and(|(x0, x1)| m.column >= x0 && m.column < x1)
+        {
+            let active = tabs.active;
+            match tabs.view(active) {
+                Some(v) => v.refresh(),
+                None => last_poll = None,
             }
             continue;
         }
@@ -1384,8 +1403,23 @@ fn draw_app(
     let waiting = rows.iter().filter(|r| r.is_waiting()).count();
     let badge = (waiting > 0).then(|| format!("⏸{waiting}"));
     let (line, hits) = tabs::tab_bar(tabs.active, bar.width, badge);
+    let used = width_of(
+        &line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>(),
+    ) as u16;
     f.render_widget(Paragraph::new(line), bar);
     dash.tab_hits = hits;
+    dash.refresh_hit = tabs::refresh_button(bar.width, used).map(|(label, x)| {
+        let w = width_of(label) as u16;
+        f.render_widget(
+            Paragraph::new(Line::styled(label, Style::default().fg(Color::Cyan))),
+            Rect::new(bar.x + x, bar.y, w, 1),
+        );
+        (x, x + w)
+    });
     if body.height == 0 {
         dash.list_area = Rect::default();
         return;
@@ -1950,6 +1984,7 @@ mod tests {
             tick: 0,
             dormant: 0,
             tab_hits: Vec::new(),
+            refresh_hit: None,
             detail: None,
             editor: None,
             term: None,

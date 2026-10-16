@@ -145,6 +145,10 @@ impl View for TasksView {
         }
     }
 
+    fn refresh(&mut self) {
+        self.fetch();
+    }
+
     fn tick(&mut self) {
         if self.load.poll() {
             self.sel = self.sel.min(self.tasks().len().saturating_sub(1));
@@ -245,7 +249,7 @@ impl View for TasksView {
                 self.sel = (self.sel + 1).min(self.tasks().len().saturating_sub(1));
             }
             KeyCode::Up | KeyCode::Char('k') => self.sel = self.sel.saturating_sub(1),
-            KeyCode::Char('r') => self.fetch(),
+            KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('g') => {
                 self.grouping = match self.grouping {
                     Grouping::Status => Grouping::Project,

@@ -197,6 +197,10 @@ impl View for SettingsView {
         self.reload();
     }
 
+    fn refresh(&mut self) {
+        self.reload();
+    }
+
     fn tick(&mut self) {
         if self.server.poll() {
             let text = self.text();

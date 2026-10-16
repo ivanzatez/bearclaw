@@ -270,7 +270,8 @@ Sessions tab:
 Files open in a built-in editor over the dashboard: type to edit, Ctrl+S saves, Esc (or
 Ctrl+C) saves what changed and closes — a failed save keeps it open, so nothing typed is lost.
 
-Other tabs (each loads in the background the first time it is shown; `r` reloads):
+Other tabs (each loads in the background the first time it is shown; `r` — or the **⟳ refresh**
+button at the right end of the tab bar, on any tab — reloads now):
 
 | tab | keys |
 | --- | --- |

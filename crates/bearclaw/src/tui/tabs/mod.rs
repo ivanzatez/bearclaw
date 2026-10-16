@@ -136,6 +136,15 @@ pub fn tab_bar(
     (Line::default(), Vec::new())
 }
 
+/// The refresh button at the right end of the bar, when it fits after `used` columns of tabs
+/// (with a gap): its label and first column. Shortens to the icon alone before it disappears.
+pub fn refresh_button(width: u16, used: u16) -> Option<(&'static str, u16)> {
+    [" ⟳ refresh ", " ⟳ "].into_iter().find_map(|label| {
+        let w = width_of(label) as u16;
+        (used + 1 + w <= width).then_some((label, width - w))
+    })
+}
+
 pub fn hit(ranges: &[(Tab, u16, u16)], x: u16) -> Option<Tab> {
     ranges
         .iter()
@@ -176,6 +185,8 @@ pub trait View {
     fn tick(&mut self);
     fn draw(&mut self, f: &mut Frame, area: Rect);
     fn key(&mut self, k: KeyEvent) -> Outcome;
+    /// Fetch or re-read now, whatever the cache says (`r`, or the bar's refresh button).
+    fn refresh(&mut self);
     /// Pasted text, for a view with a text input open; dropped otherwise.
     fn paste(&mut self, _text: &str) {}
     /// A text input is open: every key is its, Tab and `q` included.
@@ -321,6 +332,13 @@ mod tests {
         // Bare arrows stay the tabs' own (→ opens a session, ← goes back).
         assert_eq!(tab_step(key(KeyCode::Right, KeyModifiers::NONE)), None);
         assert_eq!(tab_step(key(KeyCode::Left, KeyModifiers::NONE)), None);
+    }
+
+    #[test]
+    fn the_refresh_button_sits_right_when_it_fits() {
+        assert_eq!(refresh_button(120, 55), Some((" ⟳ refresh ", 109)));
+        assert_eq!(refresh_button(60, 55), Some((" ⟳ ", 57)));
+        assert_eq!(refresh_button(56, 55), None);
     }
 
     #[test]

@@ -156,6 +156,10 @@ impl View for NotesView {
 
     fn tick(&mut self) {}
 
+    fn refresh(&mut self) {
+        self.relist();
+    }
+
     fn typing(&self) -> bool {
         self.input.is_some() || self.confirm_delete.is_some()
     }
@@ -404,6 +408,17 @@ mod tests {
         v.paste("helm");
         let s = screen(&mut v, 80, 10);
         assert!(s.contains("Deploy api") && !s.contains("Deploy web"), "{s}");
+    }
+
+    #[test]
+    fn refresh_picks_up_new_files() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = NotesView::notepad_at(d.path().to_path_buf());
+        v.on_show();
+        std::fs::write(d.path().join("later.txt"), "Written later\n").unwrap();
+        assert!(!screen(&mut v, 80, 8).contains("Written later"));
+        v.refresh();
+        assert!(screen(&mut v, 80, 8).contains("Written later"));
     }
 
     #[test]

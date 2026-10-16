@@ -60,6 +60,10 @@ impl View for UsageView {
         self.load.poll();
     }
 
+    fn refresh(&mut self) {
+        self.fetch(true);
+    }
+
     fn draw(&mut self, f: &mut Frame, area: Rect) {
         let mut title = String::from(" Usage ");
         if let Some(u) = &self.load.data {
@@ -176,7 +180,7 @@ impl View for UsageView {
             return o;
         }
         if k.code == KeyCode::Char('r') {
-            self.fetch(true);
+            self.refresh();
         }
         Outcome::None
     }

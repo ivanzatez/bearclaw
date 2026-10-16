@@ -262,6 +262,10 @@ impl View for PrsView {
         }
     }
 
+    fn refresh(&mut self) {
+        self.fetch(Mode::Refresh);
+    }
+
     fn draw(&mut self, f: &mut Frame, area: Rect) {
         let mut title = String::from(" PRs ");
         if let Some(v) = &self.load.data {
@@ -350,7 +354,7 @@ impl View for PrsView {
             KeyCode::Left | KeyCode::Char('h') => self.lane = self.lane.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => self.step_card(true),
             KeyCode::Up | KeyCode::Char('k') => self.step_card(false),
-            KeyCode::Char('r') => self.fetch(Mode::Refresh),
+            KeyCode::Char('r') => self.refresh(),
             KeyCode::Enter | KeyCode::Char('o') => {
                 if let Some(p) = self.selected_pr()
                     && let Err(e) = open_url(&p.url)
