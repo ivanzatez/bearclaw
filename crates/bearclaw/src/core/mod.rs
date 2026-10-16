@@ -18,6 +18,7 @@ pub mod prs;
 pub mod repos;
 pub mod snapshot;
 pub mod stack;
+pub mod sticky;
 pub mod title;
 pub mod tmux;
 pub mod todo;
