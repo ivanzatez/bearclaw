@@ -4,6 +4,7 @@
 pub mod backend;
 pub mod brain;
 pub mod brief;
+pub mod claw;
 pub mod config;
 pub mod context;
 pub mod discovery;

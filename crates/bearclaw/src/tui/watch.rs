@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyEventKind, MouseButton, MouseEventKind,
+    Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -333,6 +333,12 @@ struct Dash {
     new_prompt: Option<String>,
     /// Sessions' todo lines and sticky notes, by session id.
     notes: HashMap<String, SessionNote>,
+    /// Claw's terminal, once its session is up (Claw tab).
+    claw: Option<Term>,
+    /// Claw's session being found or started in the background.
+    claw_starting: Option<Receiver<std::result::Result<String, String>>>,
+    /// Why Claw could not start (`r` on its tab retries).
+    claw_error: Option<String>,
     /// A new session being started in the background: its tmux session name, or why not.
     spawning: Option<Receiver<std::result::Result<String, String>>>,
 }
@@ -804,9 +810,14 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         new_session: None,
         new_prompt: None,
         notes: HashMap::new(),
+        claw: None,
+        claw_starting: None,
+        claw_error: None,
         spawning: None,
     };
     let mut tabs = Tabs::new();
+    // Claw's own session never shows in the list: it is the Claw tab.
+    let claw_dir = crate::core::claw::dir();
     let mut naming = Naming::new(&loaded.cfg.naming);
     let sync_tmux = loaded.cfg.naming.sync_tmux();
     // A config that doesn't parse degrades to defaults in silence — say so once,
@@ -875,6 +886,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         if last_poll.map(|t| t.elapsed() >= interval).unwrap_or(true) {
             let (r, mut evs) = tick(&mut state, o.stuck_secs);
             rows = r;
+            rows.retain(|s| !crate::core::claw::is_claw(s, &claw_dir));
             evs.reverse(); // newest first when prepended
             for e in evs {
                 log.insert(0, e);
@@ -904,6 +916,32 @@ fn run_tui(o: WatchOpts) -> Result<()> {
 
         tabs.tick_all();
         if let Some(t) = dash.term.as_mut() {
+            t.embed.pump();
+        }
+        if tabs.active == Tab::Claw
+            && dash.claw.is_none()
+            && dash.claw_starting.is_none()
+            && dash.claw_error.is_none()
+        {
+            dash.claw_starting = Some(start_claw());
+        }
+        if let Some(rx) = &dash.claw_starting
+            && let Ok(result) = rx.try_recv()
+        {
+            dash.claw_starting = None;
+            let (cols, height) = crossterm::terminal::size().unwrap_or((80, 24));
+            match result.and_then(|name| {
+                Embedded::attach(&name, height.saturating_sub(2), cols).map(|embed| Term {
+                    session: name,
+                    id: None,
+                    embed,
+                })
+            }) {
+                Ok(t) => dash.claw = Some(t),
+                Err(e) => dash.claw_error = Some(e),
+            }
+        }
+        if let Some(t) = dash.claw.as_mut() {
             t.embed.pump();
         }
         if let Some(rx) = &dash.spawning
@@ -944,7 +982,11 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             .map_err(Error::Io)?;
 
         // A live terminal redraws at screen pace; the dashboard alone is calmer.
-        let wait = if dash.term.is_some() || dash.spawning.is_some() {
+        let wait = if dash.term.is_some()
+            || dash.spawning.is_some()
+            || dash.claw_starting.is_some()
+            || (tabs.active == Tab::Claw && dash.claw.is_some())
+        {
             16
         } else {
             250
@@ -1015,36 +1057,27 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             continue;
         }
 
-        // The open terminal owns the Sessions tab: every key goes into it except Ctrl+].
+        // The open terminal owns the Sessions tab: every key goes into it except Ctrl+L.
         if tabs.active == Tab::Sessions
             && let Some(t) = dash.term.as_mut()
         {
-            match &ev {
-                Event::Key(k) if k.kind != KeyEventKind::Release => {
-                    if term_keys::is_leave(*k) || !t.embed.alive() {
-                        dash.term = None;
-                    } else if let Some(bytes) = term_keys::encode(*k) {
-                        t.embed.write(&bytes);
-                    }
-                }
-                Event::Paste(text) => t.embed.write(&term_keys::paste(text)),
-                Event::Mouse(m) => match m.kind {
-                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                        let a = dash.term_area;
-                        let up = m.kind == MouseEventKind::ScrollUp;
-                        t.embed.write(&term_keys::wheel(
-                            up,
-                            m.column.saturating_sub(a.x),
-                            m.row.saturating_sub(a.y),
-                        ));
-                    }
-                    _ => match term_click(*m, dash.term_area, &dash.tab_hits) {
-                        TermClick::Leave => dash.term = None,
-                        TermClick::Switch(to) => tabs.switch(to),
-                        TermClick::None => {}
-                    },
-                },
-                _ => {}
+            match term_input(t, &ev, dash.term_area, &dash.tab_hits) {
+                TermInput::Leave => dash.term = None,
+                TermInput::Switch(to) => tabs.switch(to),
+                TermInput::None => {}
+            }
+            continue;
+        }
+        // Claw's terminal is its tab; leaving goes back to Sessions, a dead one restarts.
+        if tabs.active == Tab::Claw
+            && let Some(t) = dash.claw.as_mut()
+        {
+            let dead = !t.embed.alive();
+            match term_input(t, &ev, dash.term_area, &dash.tab_hits) {
+                TermInput::Leave if dead => dash.claw = None,
+                TermInput::Leave => tabs.switch(Tab::Sessions),
+                TermInput::Switch(to) => tabs.switch(to),
+                TermInput::None => {}
             }
             continue;
         }
@@ -1113,6 +1146,20 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 tabs.switch(t);
                 continue;
             }
+        }
+        // Claw is still starting (or failed to): only its own few keys mean anything.
+        if tabs.active == Tab::Claw {
+            if let Event::Key(k) = ev
+                && k.kind != KeyEventKind::Release
+            {
+                match k.code {
+                    KeyCode::Char('q') => break,
+                    KeyCode::Esc => tabs.switch(Tab::Sessions),
+                    KeyCode::Char('r') => dash.claw_error = None,
+                    _ => {}
+                }
+            }
+            continue;
         }
         let active = tabs.active;
         if let Some(view) = tabs.view(active) {
@@ -1343,6 +1390,101 @@ fn clamp_offset(dash: &mut Dash, len: usize) {
 // --- drawing -----------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TermInput {
+    None,
+    /// Ctrl+L, a tap on the header, or any key once the session has ended.
+    Leave,
+    Switch(Tab),
+}
+
+/// An event for an open terminal: keys, paste and wheel go into it; the way out and taps on the
+/// tab bar come back as what the loop should do.
+fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) -> TermInput {
+    match ev {
+        Event::Key(k) if k.kind != KeyEventKind::Release => {
+            if term_keys::is_leave(*k) || !t.embed.alive() {
+                return TermInput::Leave;
+            }
+            if let Some(bytes) = term_keys::encode(*k) {
+                t.embed.write(&bytes);
+            }
+            TermInput::None
+        }
+        Event::Paste(text) => {
+            t.embed.write(&term_keys::paste(text));
+            TermInput::None
+        }
+        Event::Mouse(m) => match m.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = m.kind == MouseEventKind::ScrollUp;
+                t.embed.write(&term_keys::wheel(
+                    up,
+                    m.column.saturating_sub(area.x),
+                    m.row.saturating_sub(area.y),
+                ));
+                TermInput::None
+            }
+            _ => match term_click(*m, area, hits) {
+                TermClick::Leave => TermInput::Leave,
+                TermClick::Switch(to) => TermInput::Switch(to),
+                TermClick::None => TermInput::None,
+            },
+        },
+        _ => TermInput::None,
+    }
+}
+
+/// Claw's tmux session: prepare its workspace, then reuse the running session or start one.
+fn start_claw() -> Receiver<std::result::Result<String, String>> {
+    use crate::core::claw;
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let dir = claw::dir();
+        let result = claw::prepare(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|()| {
+                let running = crate::core::tools::tmux_cmd()
+                    .args(["has-session", "-t", &format!("={}", claw::SESSION)])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if running {
+                    return Ok(claw::SESSION.to_string());
+                }
+                use crate::core::harness::Harness;
+                backend::spawn_tagged(
+                    crate::core::discovery::Backend::Tmux,
+                    &dir.display().to_string(),
+                    backend::Prompt::None,
+                    None,
+                    Some(claw::SESSION),
+                    false,
+                    &Harness::Claude.command(),
+                    Harness::Claude,
+                    None,
+                )
+                .map_err(|e| e.to_string())
+                .map(|(_, ts)| ts.unwrap_or_else(|| claw::SESSION.to_string()))
+            });
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+/// An open terminal under a one-line header; returns where the screen went (for the wheel).
+fn draw_term(f: &mut ratatui::Frame, body: Rect, t: &mut Term, header: String) -> Rect {
+    let [head, screen] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
+    f.render_widget(
+        Paragraph::new(Line::styled(header, Style::default().fg(Color::DarkGray))),
+        head,
+    );
+    t.embed.resize(screen.height, screen.width);
+    t.embed.draw(f.buffer_mut(), screen);
+    screen
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TermClick {
     None,
     Leave,
@@ -1501,19 +1643,38 @@ fn draw_app(
         ed.draw(f, body);
         return;
     }
+    if tabs.active == Tab::Claw {
+        dash.list_area = Rect::default();
+        match dash.claw.as_mut() {
+            Some(t) => {
+                let header = if t.embed.alive() {
+                    " ✦ Claw · tell it what to do · ctrl+l (or tap here) back to Sessions ".into()
+                } else {
+                    " ✦ Claw ended — any key starts it again ".into()
+                };
+                dash.term_area = draw_term(f, body, t, header);
+            }
+            None => {
+                let msg = match &dash.claw_error {
+                    Some(e) => format!(" ✦ Claw couldn't start: {e} — r to retry"),
+                    None => " ✦ starting Claw…".into(),
+                };
+                f.render_widget(Paragraph::new(msg).wrap(Wrap { trim: false }), body);
+            }
+        }
+        return;
+    }
     if tabs.active == Tab::Sessions
         && let Some(t) = dash.term.as_mut()
     {
         dash.list_area = Rect::default();
-        let [head, screen] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
         let doing =
             t.id.as_ref()
                 .and_then(|id| dash.notes.get(id))
                 .and_then(|n| n.todo.as_deref())
                 .map(|line| format!(" · {line}"))
                 .unwrap_or_default();
-        let status = if t.embed.alive() {
+        let header = if t.embed.alive() {
             format!(
                 " ⧉ {}{doing} · ctrl+l (or tap here) back to the list ",
                 t.session
@@ -1521,13 +1682,7 @@ fn draw_app(
         } else {
             format!(" ⧉ {} · the session ended — any key to go back ", t.session)
         };
-        f.render_widget(
-            Paragraph::new(Line::styled(status, Style::default().fg(Color::DarkGray))),
-            head,
-        );
-        t.embed.resize(screen.height, screen.width);
-        t.embed.draw(f.buffer_mut(), screen);
-        dash.term_area = screen;
+        dash.term_area = draw_term(f, body, t, header);
         return;
     }
     let active = tabs.active;
@@ -2130,6 +2285,9 @@ mod tests {
             new_session: None,
             new_prompt: None,
             notes: HashMap::new(),
+            claw: None,
+            claw_starting: None,
+            claw_error: None,
             spawning: None,
         }
     }
@@ -2283,6 +2441,23 @@ mod tests {
         );
         // Inside the screen a tap belongs to the session.
         assert_eq!(term_click(tap(10, 5), screen, &hits), TermClick::None);
+    }
+
+    #[test]
+    fn the_claw_tab_says_what_it_is_doing() {
+        let rows = fixture();
+        let mut tabs = Tabs::new();
+        tabs.active = Tab::Claw;
+        let s = app_screen(120, 12, &mut tabs, &rows).join("\n");
+        assert!(s.contains("starting Claw"), "{s}");
+        assert!(!s.contains("3 live"), "{s}");
+        let mut dash = test_dash();
+        dash.claw_error = Some("tmux: not found".into());
+        let s = app_screen_with(120, 12, &mut tabs, &rows, &mut dash).join("\n");
+        assert!(
+            s.contains("tmux: not found") && s.contains("r to retry"),
+            "{s}"
+        );
     }
 
     #[test]

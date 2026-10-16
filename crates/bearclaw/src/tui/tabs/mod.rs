@@ -26,6 +26,7 @@ use crate::cli::render::width_of;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Sessions,
+    Claw,
     Prs,
     Tasks,
     Todo,
@@ -36,8 +37,9 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Tab::Sessions,
+        Tab::Claw,
         Tab::Prs,
         Tab::Tasks,
         Tab::Todo,
@@ -50,6 +52,7 @@ impl Tab {
     pub fn title(self) -> &'static str {
         match self {
             Tab::Sessions => "Sessions",
+            Tab::Claw => "Claw",
             Tab::Prs => "PRs",
             Tab::Tasks => "Tasks",
             Tab::Todo => "Todo",
@@ -62,14 +65,15 @@ impl Tab {
 
     pub fn short(self) -> &'static str {
         match self {
-            Tab::Sessions => "Ses",
+            Tab::Sessions => "Se",
+            Tab::Claw => "Cl",
             Tab::Prs => "PR",
-            Tab::Tasks => "Tsk",
-            Tab::Todo => "Tdo",
-            Tab::Usage => "Use",
-            Tab::Brain => "Brn",
-            Tab::Notes => "Not",
-            Tab::Settings => "Set",
+            Tab::Tasks => "Ta",
+            Tab::Todo => "To",
+            Tab::Usage => "Us",
+            Tab::Brain => "Br",
+            Tab::Notes => "No",
+            Tab::Settings => "St",
         }
     }
 
@@ -221,7 +225,8 @@ pub fn common_key(k: KeyEvent) -> Option<Outcome> {
 /// The non-Sessions tabs' views, in [`Tab::ALL`] order, and which tab is up.
 pub struct Tabs {
     pub active: Tab,
-    views: Vec<Box<dyn View>>,
+    /// Every tab but Sessions and Claw (the dashboard and a terminal, drawn by the loop).
+    views: Vec<(Tab, Box<dyn View>)>,
 }
 
 impl Default for Tabs {
@@ -232,17 +237,20 @@ impl Default for Tabs {
 
 impl Tabs {
     pub fn new() -> Self {
-        let views: Vec<Box<dyn View>> = Tab::ALL[1..]
+        let views: Vec<(Tab, Box<dyn View>)> = Tab::ALL
             .iter()
-            .map(|&t| match t {
-                Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
-                Tab::Tasks => Box::new(tasks::TasksView::new()),
-                Tab::Todo => Box::new(todo::TodoView::new()),
-                Tab::Usage => Box::new(usage::UsageView::new()),
-                Tab::Brain => Box::new(notes::NotesView::brain()),
-                Tab::Notes => Box::new(notes::NotesView::notepad()),
-                Tab::Settings => Box::new(settings::SettingsView::new()),
-                Tab::Sessions => unreachable!("Sessions is the dashboard itself"),
+            .filter_map(|&t| {
+                let v: Box<dyn View> = match t {
+                    Tab::Sessions | Tab::Claw => return None,
+                    Tab::Prs => Box::new(prs::PrsView::new()),
+                    Tab::Tasks => Box::new(tasks::TasksView::new()),
+                    Tab::Todo => Box::new(todo::TodoView::new()),
+                    Tab::Usage => Box::new(usage::UsageView::new()),
+                    Tab::Brain => Box::new(notes::NotesView::brain()),
+                    Tab::Notes => Box::new(notes::NotesView::notepad()),
+                    Tab::Settings => Box::new(settings::SettingsView::new()),
+                };
+                Some((t, v))
             })
             .collect();
         Tabs {
@@ -251,10 +259,12 @@ impl Tabs {
         }
     }
 
-    /// `None` for Sessions: that one is the dashboard itself.
+    /// `None` for Sessions and Claw: those the loop draws itself.
     pub fn view(&mut self, t: Tab) -> Option<&mut (dyn View + 'static)> {
-        let i = t.index().checked_sub(1)?;
-        self.views.get_mut(i).map(|v| v.as_mut())
+        self.views
+            .iter_mut()
+            .find(|(tab, _)| *tab == t)
+            .map(|(_, v)| v.as_mut())
     }
 
     pub fn switch(&mut self, t: Tab) {
@@ -265,13 +275,13 @@ impl Tabs {
     }
 
     pub fn tick_all(&mut self) {
-        for v in &mut self.views {
+        for (_, v) in &mut self.views {
             v.tick();
         }
     }
 
     pub fn live(&mut self, ids: &[String]) {
-        for v in &mut self.views {
+        for (_, v) in &mut self.views {
             v.live(ids);
         }
     }
@@ -292,10 +302,18 @@ mod tests {
     }
 
     #[test]
+    fn claw_is_the_second_tab_and_not_a_view() {
+        assert_eq!(Tab::Sessions.next(), Tab::Claw);
+        let mut tabs = Tabs::new();
+        assert!(tabs.view(Tab::Claw).is_none() && tabs.view(Tab::Sessions).is_none());
+        assert!(tabs.view(Tab::Prs).is_some() && tabs.view(Tab::Settings).is_some());
+    }
+
+    #[test]
     fn tab_cycle_wraps() {
         assert_eq!(Tab::Settings.next(), Tab::Sessions);
         assert_eq!(Tab::Sessions.prev(), Tab::Settings);
-        assert_eq!(Tab::Sessions.next(), Tab::Prs);
+        assert_eq!(Tab::Claw.next(), Tab::Prs);
     }
 
     #[test]
