@@ -1460,7 +1460,7 @@ fn start_claw() -> Receiver<std::result::Result<String, String>> {
                     None,
                     Some(claw::SESSION),
                     false,
-                    &Harness::Claude.command(),
+                    &claw::launcher(&Harness::Claude.command()),
                     Harness::Claude,
                     None,
                 )
