@@ -26,6 +26,8 @@ ratatui.workspace = true
 crossterm.workspace = true
 unicode-width.workspace = true
 tui-textarea.workspace = true
+vt100.workspace = true
+portable-pty.workspace = true
 dirs = "6"
 
 [dev-dependencies]
