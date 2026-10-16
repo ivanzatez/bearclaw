@@ -84,29 +84,35 @@ impl Pager {
     }
 }
 
-/// Word-wrap `text` to `width` columns; a word longer than the width is cut. Blank lines stay.
+/// Word-wrap `text` to `width` columns, keeping indentation and runs of spaces; the spaces a
+/// line breaks at are dropped, and a word longer than the width is cut. Blank lines stay.
 pub fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
+    let cols = |s: &str| s.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
     let mut out = Vec::new();
     for raw in text.lines() {
         let mut line = String::new();
         let mut used = 0;
-        for word in raw.split(' ') {
-            let w: usize = word.chars().map(|c| c.width().unwrap_or(0)).sum();
-            let gap = usize::from(!line.is_empty());
-            if used + gap + w <= width {
-                if gap == 1 {
-                    line.push(' ');
-                }
-                line.push_str(word);
-                used += gap + w;
+        let mut gap = String::new();
+        for (is_space, tok) in runs(raw) {
+            if is_space {
+                gap = tok;
                 continue;
             }
+            let (gw, w) = (cols(&gap), cols(&tok));
+            if used + gw + w <= width {
+                line.push_str(&gap);
+                line.push_str(&tok);
+                used += gw + w;
+                gap.clear();
+                continue;
+            }
+            gap.clear();
             if !line.is_empty() {
                 out.push(std::mem::take(&mut line));
                 used = 0;
             }
-            for c in word.chars() {
+            for c in tok.chars() {
                 let cw = c.width().unwrap_or(0);
                 if used + cw > width {
                     out.push(std::mem::take(&mut line));
@@ -117,6 +123,19 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
             }
         }
         out.push(line);
+    }
+    out
+}
+
+/// `raw` split into alternating runs of spaces and of everything else: `(is_space, run)`.
+fn runs(raw: &str) -> Vec<(bool, String)> {
+    let mut out: Vec<(bool, String)> = Vec::new();
+    for c in raw.chars() {
+        let space = c == ' ';
+        match out.last_mut() {
+            Some((s, run)) if *s == space => run.push(c),
+            _ => out.push((space, c.to_string())),
+        }
     }
     out
 }
@@ -163,5 +182,8 @@ mod tests {
         assert_eq!(wrap("aaa bbb ccc", 7), vec!["aaa bbb", "ccc"]);
         assert_eq!(wrap("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
         assert_eq!(wrap("a\n\nb", 10), vec!["a", "", "b"]);
+        // Indentation and column alignment survive; the space a line breaks at does not.
+        assert_eq!(wrap("  file      x", 20), vec!["  file      x"]);
+        assert_eq!(wrap("  aa bb", 5), vec!["  aa", "bb"]);
     }
 }
