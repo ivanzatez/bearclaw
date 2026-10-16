@@ -61,6 +61,12 @@ You are not a work session: do not set a todo item or a sticky note for yourself
   yes from the user first.
 "#;
 
+/// How Claw starts: the configured launcher, minus a shell-wide `ANTHROPIC_MODEL` — Claw runs
+/// on Claude Code's own default (settings / account), whatever the work sessions are pinned to.
+pub fn launcher(base: &str) -> String {
+    format!("env -u ANTHROPIC_MODEL {base}")
+}
+
 fn settings() -> serde_json::Value {
     serde_json::json!({
         "permissions": {
@@ -128,6 +134,15 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(ws.join("CLAUDE.local.md")).unwrap(),
             "mine"
+        );
+    }
+
+    #[test]
+    fn claw_runs_on_claude_codes_own_default_model() {
+        // A shell-wide ANTHROPIC_MODEL (set for work sessions) must not pick Claw's model.
+        assert_eq!(
+            launcher("claude --dangerously-skip-permissions"),
+            "env -u ANTHROPIC_MODEL claude --dangerously-skip-permissions"
         );
     }
 
