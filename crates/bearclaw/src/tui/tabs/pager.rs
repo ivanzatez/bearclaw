@@ -15,6 +15,7 @@ pub struct Pager {
     scroll: usize,
     /// The text area's height on the last draw — what a page is.
     page: usize,
+    hint: String,
 }
 
 impl Pager {
@@ -24,7 +25,19 @@ impl Pager {
             text,
             scroll: 0,
             page: 1,
+            hint: " esc back · j/k scroll · g/G top/end ".into(),
         }
+    }
+
+    /// Replace the bottom-border key hint.
+    pub fn with_hint(mut self, hint: &str) -> Self {
+        self.hint = format!(" {hint} ");
+        self
+    }
+
+    /// New text, same scroll position (clamped on the next draw).
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
     }
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -33,7 +46,7 @@ impl Pager {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(format!(" {} ", self.title))
             .title_bottom(Line::styled(
-                " esc back · j/k scroll · g/G top/end ",
+                self.hint.clone(),
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);

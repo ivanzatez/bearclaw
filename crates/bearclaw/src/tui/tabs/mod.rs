@@ -7,6 +7,7 @@ pub mod loader;
 pub mod memos;
 pub mod pager;
 pub mod prs;
+pub mod settings;
 pub mod tasks;
 pub mod usage;
 
@@ -17,7 +18,6 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 
 use crate::cli::render::width_of;
 
@@ -180,24 +180,6 @@ pub fn common_key(k: KeyEvent) -> Option<Outcome> {
     }
 }
 
-/// A tab not built yet.
-pub struct Placeholder(pub &'static str);
-
-impl View for Placeholder {
-    fn on_show(&mut self) {}
-    fn tick(&mut self) {}
-    fn draw(&mut self, f: &mut Frame, area: Rect) {
-        f.render_widget(
-            Paragraph::new(format!(" {} — coming soon", self.0))
-                .style(Style::default().fg(Color::DarkGray)),
-            area,
-        );
-    }
-    fn key(&mut self, k: KeyEvent) -> Outcome {
-        common_key(k).unwrap_or(Outcome::None)
-    }
-}
-
 /// The non-Sessions tabs' views, in [`Tab::ALL`] order, and which tab is up.
 pub struct Tabs {
     pub active: Tab,
@@ -220,7 +202,8 @@ impl Tabs {
                 Tab::Usage => Box::new(usage::UsageView::new()),
                 Tab::Brain => Box::new(brain::BrainView::new()),
                 Tab::Memos => Box::new(memos::MemosView::new()),
-                _ => Box::new(Placeholder(t.title())),
+                Tab::Settings => Box::new(settings::SettingsView::new()),
+                Tab::Sessions => unreachable!("Sessions is the dashboard itself"),
             })
             .collect();
         Tabs {

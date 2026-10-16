@@ -165,6 +165,16 @@ fn is_ours(h: &Value) -> bool {
         .is_some_and(|c| c.trim_end().ends_with(HOOK_SUFFIX))
 }
 
+/// Whether a parsed `settings.json` has our SessionStart hook.
+pub fn hook_installed(settings: &Value) -> bool {
+    settings["hooks"]["SessionStart"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|e| e["hooks"].as_array().into_iter().flatten())
+        .any(is_ours)
+}
+
 /// Put our SessionStart hook in a parsed `settings.json`: replace the command of an existing
 /// one in place, else append an entry. Everything else stays as it was. True when it changed.
 pub fn install_hook(settings: &mut Value, command: &str) -> bool {
@@ -358,8 +368,10 @@ mod tests {
         assert_eq!(starts.len(), 2);
         assert_eq!(starts[1]["hooks"][0]["command"], "/new/bearclaw brain hook");
 
+        assert!(hook_installed(&v));
         assert!(uninstall_hook(&mut v));
         assert_eq!(v, original);
+        assert!(!hook_installed(&v));
         assert!(!uninstall_hook(&mut v));
 
         let mut empty = serde_json::json!({});
