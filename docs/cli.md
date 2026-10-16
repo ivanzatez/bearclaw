@@ -274,7 +274,7 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 
 | tab | keys |
 | --- | --- |
-| PRs | `bearclaw prs` as a kanban: one lane per column (empty ones hidden), one card per PR (checks, title, `repo#N`, size, age, comments) · ←/→ `h`/`l` lane · ↑/↓ `j`/`k` card · Enter/`o` open in the browser; on a narrow pane the lanes page, `‹`/`›` marking more |
+| PRs | `bearclaw prs` as a kanban, lanes as in tb-pr: **Draft · In review · Ready to merge · Waiting on me · Mentions** (shown even when empty; "waiting on author" has no lane), one card per PR (checks, title, `repo#N`, size, age, comments) · ←/→ `h`/`l` lane · ↑/↓ `j`/`k` card · Enter/`o` open in the browser; on a narrow pane the lanes page, `‹`/`›` marking more |
 | Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
 | Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |
 | Settings | one page: config file, web server (and whether it answers), brain folder and hook, Productive org and token, spawn dirs, repos, PR scope · `e` edits the config, re-read on return |

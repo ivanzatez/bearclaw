@@ -24,13 +24,22 @@ const LANE_MIN: u16 = 26;
 /// Rows one card takes: border, two title lines, `repo#N`, meta, border.
 const CARD_H: u16 = 6;
 
-/// Non-empty columns in [`Column::ALL`] order, each with its PRs (indices into `prs`).
-pub fn lanes(prs: &[Pr]) -> Vec<(Column, Vec<usize>)> {
-    Column::ALL
+/// The lanes, in tb-pr's order and wording. "Waiting on author" has no lane.
+const LANES: [(&str, Column); 5] = [
+    ("Draft", Column::DraftMine),
+    ("In review", Column::ReviewMine),
+    ("Ready to merge", Column::ReadyToMergeMine),
+    ("Waiting on me", Column::WaitingOnMe),
+    ("Mentions", Column::UnseenMentions),
+];
+
+/// Every lane, empty ones included, each with its PRs (indices into `prs`).
+pub fn lanes(prs: &[Pr]) -> Vec<(&'static str, Column, Vec<usize>)> {
+    LANES
         .into_iter()
-        .filter_map(|col| {
+        .map(|(title, col)| {
             let idx: Vec<usize> = (0..prs.len()).filter(|&i| prs[i].column == col).collect();
-            (!idx.is_empty()).then_some((col, idx))
+            (title, col, idx)
         })
         .collect()
 }
@@ -83,19 +92,24 @@ impl PrsView {
 
     pub fn selected_pr(&self) -> Option<&Pr> {
         let lanes = lanes(self.prs());
-        let (col, idx) = lanes.get(self.lane.min(lanes.len().saturating_sub(1)))?;
-        let at = self.card.get(col).copied().unwrap_or(0).min(idx.len() - 1);
+        let (_, col, idx) = lanes.get(self.lane.min(lanes.len().saturating_sub(1)))?;
+        let at = self
+            .card
+            .get(col)
+            .copied()
+            .unwrap_or(0)
+            .min(idx.len().checked_sub(1)?);
         Some(&self.prs()[idx[at]])
     }
 
     fn step_card(&mut self, down: bool) {
         let lanes = lanes(self.prs());
-        let Some((col, idx)) = lanes.get(self.lane) else {
+        let Some((_, col, idx)) = lanes.get(self.lane) else {
             return;
         };
         let at = self.card.entry(*col).or_insert(0);
         *at = if down {
-            (*at + 1).min(idx.len() - 1)
+            (*at + 1).min(idx.len().saturating_sub(1))
         } else {
             at.saturating_sub(1)
         };
@@ -162,7 +176,7 @@ impl PrsView {
         &self,
         f: &mut Frame,
         area: Rect,
-        (col, idx): &(Column, Vec<usize>),
+        (title, col, idx): &(&str, Column, Vec<usize>),
         selected_lane: bool,
         (more_left, more_right): (bool, bool),
     ) {
@@ -177,12 +191,22 @@ impl PrsView {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border))
             .title(fit(
-                &format!("{left} {} ({}) {right}", col.title(), idx.len()),
+                &format!("{left} {title} ({}) {right}", idx.len()),
                 area.width.saturating_sub(2) as usize,
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
         if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+        if idx.is_empty() {
+            f.render_widget(
+                Paragraph::new(Line::styled(
+                    "(inbox zero)",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                inner,
+            );
             return;
         }
         let at = self.card.get(col).copied().unwrap_or(0).min(idx.len() - 1);
@@ -281,10 +305,6 @@ impl View for PrsView {
             return;
         }
         let lanes = lanes(self.prs());
-        if lanes.is_empty() {
-            f.render_widget(Paragraph::new(" nothing needs you 🎉"), inner);
-            return;
-        }
         let visible = ((inner.width / LANE_MIN).max(1) as usize).min(lanes.len());
         self.lane = self.lane.min(lanes.len() - 1);
         if self.lane < self.first_lane {
@@ -412,15 +432,25 @@ mod tests {
     }
 
     #[test]
-    fn lanes_skip_empty_columns_in_order() {
+    fn lanes_follow_the_tb_pr_order_empty_ones_included() {
         let prs = vec![
-            pr(Column::DraftMine, 2, "draft thing"),
             pr(Column::WaitingOnMe, 1, "review me"),
+            pr(Column::DraftMine, 2, "draft thing"),
+            pr(Column::WaitingOnAuthor, 3, "their turn"),
         ];
-        // Column::ALL order: waiting on me comes before my drafts.
+        let got: Vec<(&str, Vec<usize>)> = lanes(&prs)
+            .into_iter()
+            .map(|(title, _, idx)| (title, idx))
+            .collect();
         assert_eq!(
-            lanes(&prs),
-            vec![(Column::WaitingOnMe, vec![1]), (Column::DraftMine, vec![0])]
+            got,
+            vec![
+                ("Draft", vec![1]),
+                ("In review", vec![]),
+                ("Ready to merge", vec![]),
+                ("Waiting on me", vec![0]),
+                ("Mentions", vec![]),
+            ]
         );
     }
 
@@ -432,19 +462,28 @@ mod tests {
             pr(Column::DraftMine, 3, "draft b"),
         ]);
         let n = |v: &PrsView| v.selected_pr().map(|p| p.number);
-        assert_eq!(n(&v), Some(1));
-        key(&mut v, KeyCode::Right);
         assert_eq!(n(&v), Some(2));
         key(&mut v, KeyCode::Down);
         assert_eq!(n(&v), Some(3));
         key(&mut v, KeyCode::Down);
         assert_eq!(n(&v), Some(3));
+        // An empty lane selects nothing and survives every key.
         key(&mut v, KeyCode::Right);
-        assert_eq!(n(&v), Some(3));
-        key(&mut v, KeyCode::Left);
+        assert_eq!(n(&v), None);
+        key(&mut v, KeyCode::Down);
+        key(&mut v, KeyCode::Enter);
+        for _ in 0..2 {
+            key(&mut v, KeyCode::Right);
+        }
         assert_eq!(n(&v), Some(1));
+        for _ in 0..5 {
+            key(&mut v, KeyCode::Right);
+        }
+        assert_eq!(n(&v), None);
+        for _ in 0..4 {
+            key(&mut v, KeyCode::Left);
+        }
         // Each lane remembers its card.
-        key(&mut v, KeyCode::Char('l'));
         assert_eq!(n(&v), Some(3));
     }
 
@@ -455,25 +494,31 @@ mod tests {
             pr(Column::DraftMine, 2, "draft a"),
             pr(Column::DraftMine, 3, "draft b"),
         ]);
-        let wide = screen(&mut v, 130, 30);
-        assert!(
-            wide.contains("Waiting on me (1)") && wide.contains("My drafts (2)"),
-            "{wide}"
-        );
+        let wide = screen(&mut v, 160, 30);
+        for lane in [
+            "Draft (2)",
+            "In review (0)",
+            "Ready to merge (0)",
+            "Waiting on me (1)",
+            "Mentions (0)",
+        ] {
+            assert!(wide.contains(lane), "{lane}: {wide}");
+        }
         assert!(
             wide.contains("api#1") && wide.contains("review me") && wide.contains("✓"),
             "{wide}"
         );
+        assert!(wide.contains("inbox zero"), "{wide}");
         let narrow = screen(&mut v, 40, 30);
         assert!(
-            narrow.contains("Waiting on me (1)") && !narrow.contains("My drafts"),
+            narrow.contains("Draft (2)") && !narrow.contains("In review"),
             "{narrow}"
         );
         assert!(narrow.contains("›"), "{narrow}");
         key(&mut v, KeyCode::Right);
         let paged = screen(&mut v, 40, 30);
         assert!(
-            paged.contains("My drafts (2)") && paged.contains("‹"),
+            paged.contains("In review (0)") && paged.contains("‹"),
             "{paged}"
         );
         // Tiny areas draw without panicking.
