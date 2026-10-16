@@ -621,3 +621,47 @@ fn brain_install_round_trips_settings() {
     assert!(!out.status.success());
     assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ not json");
 }
+
+// Dotfiles repos keep ~/.claude/settings.json as a symlink: install must edit the file behind
+// it, keep the link and keep the file's permissions.
+#[cfg(unix)]
+#[test]
+fn brain_install_keeps_a_symlinked_settings_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = common::Env::new();
+    env.write_config(&serde_json::json!({"brain": {"root": env.path("brain")}}));
+    let real = env.path("dotfiles/settings.json");
+    std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+    std::fs::write(&real, r#"{"model":"opus"}"#).unwrap();
+    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let link = env.path(".claude/settings.json");
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let out = env
+        .cmd()
+        .env("HOME", env.dir.path())
+        .args(["brain", "install"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&real).unwrap()).unwrap();
+    assert_eq!(v["model"], "opus");
+    assert!(
+        v["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("brain hook")
+    );
+    assert_eq!(
+        std::fs::metadata(&real).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}

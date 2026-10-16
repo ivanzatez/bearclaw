@@ -110,10 +110,9 @@ impl SettingsView {
             line(format!("  status    {status}"));
         }
         line(String::new());
-        let root = match raw["brain"]["root"].as_str() {
-            Some(r) => PathBuf::from(crate::core::tools::expand_tilde(r)),
-            None => brain::root(),
-        };
+        let home = dirs::home_dir().unwrap_or_default();
+        let brainrc = std::fs::read_to_string(home.join(".brainrc")).ok();
+        let root = brain::root_from(raw, brainrc.as_deref(), &home);
         let hook = std::fs::read_to_string(&self.claude_settings)
             .ok()
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())

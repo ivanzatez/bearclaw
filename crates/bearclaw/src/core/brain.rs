@@ -8,18 +8,35 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::core::config;
-use crate::core::tools::{expand_tilde, slugify};
+use crate::core::tools::slugify;
 
-/// `brain.root` (read fresh, so a config edit applies), else `~/brain`.
+/// Where the brain lives, read fresh so a config edit applies. See [`root_from`].
 pub fn root() -> PathBuf {
     let raw = config::load_from(&config::path()).raw;
-    match raw["brain"]["root"]
-        .as_str()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    let home = dirs::home_dir().unwrap_or_default();
+    let brainrc = fs::read_to_string(home.join(".brainrc")).ok();
+    root_from(&raw, brainrc.as_deref(), &home)
+}
+
+/// `brain.root`, else `brain_root:` from `~/.brainrc` (the `brain` CLI's file, which the web
+/// composer's `brain:` completion reads too), else `~/brain`.
+pub fn root_from(raw: &Value, brainrc: Option<&str>, home: &Path) -> PathBuf {
+    let expand = |p: &str| match p.strip_prefix('~') {
+        Some("") => home.to_path_buf(),
+        Some(rest) if rest.starts_with('/') => home.join(&rest[1..]),
+        _ => PathBuf::from(p),
+    };
+    let configured = raw["brain"]["root"].as_str().map(str::trim);
+    let from_rc = brainrc
+        .and_then(|t| t.lines().find_map(|l| l.trim().strip_prefix("brain_root:")))
+        .map(|v| v.trim().trim_matches(['"', '\'']));
+    match configured
+        .into_iter()
+        .chain(from_rc)
+        .find(|v| !v.is_empty())
     {
-        Some(r) => PathBuf::from(expand_tilde(r)),
-        None => dirs::home_dir().unwrap_or_default().join("brain"),
+        Some(v) => expand(v),
+        None => home.join("brain"),
     }
 }
 
@@ -176,63 +193,78 @@ pub fn hook_installed(settings: &Value) -> bool {
 }
 
 /// Put our SessionStart hook in a parsed `settings.json`: replace the command of an existing
-/// one in place, else append an entry. Everything else stays as it was. True when it changed.
-pub fn install_hook(settings: &mut Value, command: &str) -> bool {
-    if !settings.is_object() {
-        *settings = Value::Object(Default::default());
-    }
-    for entry in settings["hooks"]["SessionStart"]
+/// one in place, else append an entry. Everything else stays as it was. `Ok(true)` when it
+/// changed; a shape it can't safely extend is refused before anything is touched.
+pub fn install_hook(settings: &mut Value, command: &str) -> Result<bool, String> {
+    let top = settings
+        .as_object_mut()
+        .ok_or("settings.json is not a JSON object")?;
+    let hooks = top
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Default::default()))
+        .as_object_mut()
+        .ok_or("\"hooks\" is not an object")?;
+    let list = hooks
+        .entry("SessionStart")
+        .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
-        .into_iter()
-        .flatten()
-    {
-        for h in entry["hooks"].as_array_mut().into_iter().flatten() {
-            if is_ours(h) {
-                if h["command"] == command {
-                    return false;
-                }
-                h["command"] = Value::from(command);
-                return true;
+        .ok_or("\"hooks.SessionStart\" is not a list")?;
+    for entry in list.iter_mut() {
+        let Some(hs) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if let Some(h) = hs.iter_mut().find(|h| is_ours(h)) {
+            if h["command"] == command {
+                return Ok(false);
             }
+            if let Some(o) = h.as_object_mut() {
+                o.insert("command".into(), Value::from(command));
+            }
+            return Ok(true);
         }
     }
-    if !settings["hooks"].is_object() {
-        settings["hooks"] = Value::Object(Default::default());
-    }
-    if !settings["hooks"]["SessionStart"].is_array() {
-        settings["hooks"]["SessionStart"] = Value::Array(Vec::new());
-    }
-    if let Some(list) = settings["hooks"]["SessionStart"].as_array_mut() {
-        list.push(serde_json::json!({"hooks": [{"type": "command", "command": command}]}));
-    }
-    true
+    list.push(serde_json::json!({"hooks": [{"type": "command", "command": command}]}));
+    Ok(true)
 }
 
-/// Take our hook back out, and the `SessionStart` / `hooks` containers it leaves empty.
+/// Take our hook back out, and the entries and containers that leaves empty (only those).
 pub fn uninstall_hook(settings: &mut Value) -> bool {
-    let Some(list) = settings["hooks"]["SessionStart"].as_array_mut() else {
+    let Some(top) = settings.as_object_mut() else {
         return false;
     };
-    let mut changed = false;
-    for entry in list.iter_mut() {
-        if let Some(hooks) = entry["hooks"].as_array_mut() {
-            let before = hooks.len();
-            hooks.retain(|h| !is_ours(h));
-            changed |= hooks.len() != before;
-        }
+    let Some(hooks) = top.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let Some(list) = hooks.get_mut("SessionStart").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    // Per entry: `Some(true)` it held only our hook (drop it), `Some(false)` ours came out of
+    // it, `None` untouched.
+    let removed: Vec<Option<bool>> = list
+        .iter_mut()
+        .map(|entry| {
+            let hs = entry.get_mut("hooks").and_then(Value::as_array_mut)?;
+            let before = hs.len();
+            hs.retain(|h| !is_ours(h));
+            (hs.len() != before).then_some(hs.is_empty())
+        })
+        .collect();
+    if removed.iter().all(Option::is_none) {
+        return false;
     }
-    list.retain(|e| e["hooks"].as_array().is_none_or(|h| !h.is_empty()));
-    if list.is_empty()
-        && let Some(hooks) = settings["hooks"].as_object_mut()
-    {
+    let mut i = 0;
+    list.retain(|_| {
+        let keep = removed[i] != Some(true);
+        i += 1;
+        keep
+    });
+    if list.is_empty() {
         hooks.remove("SessionStart");
-        if hooks.is_empty()
-            && let Some(top) = settings.as_object_mut()
-        {
-            top.remove("hooks");
-        }
     }
-    changed
+    if hooks.is_empty() {
+        top.remove("hooks");
+    }
+    true
 }
 
 /// A new note `<slug>.md` starting with `# title`; `-2`, `-3`… rather than overwrite anything.
@@ -353,7 +385,7 @@ mod tests {
             "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "other"}]}], "Stop": []}
         });
         let mut v = original.clone();
-        assert!(install_hook(&mut v, "/bin/bearclaw brain hook"));
+        assert_eq!(install_hook(&mut v, "/bin/bearclaw brain hook"), Ok(true));
         let starts = v["hooks"]["SessionStart"].as_array().unwrap();
         assert_eq!(starts.len(), 2);
         assert_eq!(starts[0]["hooks"][0]["command"], "other");
@@ -362,8 +394,8 @@ mod tests {
         assert_eq!(keys, ["model", "hooks"]);
         assert!(v["hooks"]["Stop"].is_array());
 
-        assert!(!install_hook(&mut v, "/bin/bearclaw brain hook"));
-        assert!(install_hook(&mut v, "/new/bearclaw brain hook"));
+        assert_eq!(install_hook(&mut v, "/bin/bearclaw brain hook"), Ok(false));
+        assert_eq!(install_hook(&mut v, "/new/bearclaw brain hook"), Ok(true));
         let starts = v["hooks"]["SessionStart"].as_array().unwrap();
         assert_eq!(starts.len(), 2);
         assert_eq!(starts[1]["hooks"][0]["command"], "/new/bearclaw brain hook");
@@ -375,9 +407,57 @@ mod tests {
         assert!(!uninstall_hook(&mut v));
 
         let mut empty = serde_json::json!({});
-        assert!(install_hook(&mut empty, "b brain hook"));
+        assert_eq!(install_hook(&mut empty, "b brain hook"), Ok(true));
         assert!(uninstall_hook(&mut empty));
         assert_eq!(empty, serde_json::json!({}));
+    }
+
+    #[test]
+    fn root_falls_back_to_brainrc_then_home() {
+        let home = Path::new("/h");
+        let none = serde_json::json!({});
+        assert_eq!(root_from(&none, None, home), PathBuf::from("/h/brain"));
+        assert_eq!(
+            root_from(&none, Some("x: 1\nbrain_root: ~/notes\n"), home),
+            PathBuf::from("/h/notes")
+        );
+        assert_eq!(
+            root_from(&none, Some("brain_root: \"/abs/b\""), home),
+            PathBuf::from("/abs/b")
+        );
+        let cfg = serde_json::json!({"brain": {"root": "/cfg"}});
+        assert_eq!(
+            root_from(&cfg, Some("brain_root: ~/notes"), home),
+            PathBuf::from("/cfg")
+        );
+    }
+
+    #[test]
+    fn odd_settings_shapes_never_panic_or_corrupt() {
+        // A foreign entry without `hooks` stays exactly as it was.
+        let mut v =
+            serde_json::json!({"hooks": {"SessionStart": [{"matcher": "startup"}, "oops"]}});
+        assert_eq!(install_hook(&mut v, "b brain hook"), Ok(true));
+        assert_eq!(
+            v["hooks"]["SessionStart"][0],
+            serde_json::json!({"matcher": "startup"})
+        );
+        assert_eq!(v["hooks"]["SessionStart"][1], "oops");
+        assert!(hook_installed(&v));
+        // Shapes we can't safely extend are refused, untouched.
+        for bad in [
+            serde_json::json!({"hooks": []}),
+            serde_json::json!({"hooks": {"SessionStart": 3}}),
+        ] {
+            let mut v = bad.clone();
+            assert!(install_hook(&mut v, "b brain hook").is_err());
+            assert_eq!(v, bad);
+            assert!(!uninstall_hook(&mut v));
+            assert_eq!(v, bad);
+        }
+        let mut plain = serde_json::json!({"model": "x"});
+        assert!(!uninstall_hook(&mut plain));
+        assert_eq!(plain, serde_json::json!({"model": "x"}));
     }
 
     #[test]

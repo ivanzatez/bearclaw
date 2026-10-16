@@ -443,7 +443,8 @@ bearclaw init --yes --self laptop \
 ## Brain
 
 A folder of markdown notes every Claude Code session on this machine reads and writes —
-config `brain.root`, default `~/brain`. One topic per note; the title is the first `# ` heading
+config `brain.root`, else `brain_root:` from `~/.brainrc` (the file the web composer's `brain:`
+completion reads), else `~/brain`. One topic per note; the title is the first `# ` heading
 (after optional `---` frontmatter), else the file name. The dashboard's Brain tab browses it.
 
 | command | does |

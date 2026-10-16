@@ -80,6 +80,7 @@ fn install(uninstall: bool) -> Result<()> {
         let exe = crate::cli::hosts::current_exe()?;
         let command = format!("{} brain hook", shq_min(&exe.display().to_string()));
         brain::install_hook(&mut settings, &command)
+            .map_err(|e| Error::Other(format!("{}: {e} — left untouched", path.display())))?
     };
     if !changed {
         println!("{}: nothing to change", path.display());
@@ -95,12 +96,18 @@ fn install(uninstall: bool) -> Result<()> {
     Ok(())
 }
 
+/// Through a symlink (dotfiles keep settings.json as one) onto the file behind it, with that
+/// file's permissions.
 fn write_atomic(path: &Path, text: &str) -> Result<()> {
-    if let Some(dir) = path.parent() {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.bearclaw-tmp");
+    let tmp = target.with_extension("json.bearclaw-tmp");
     std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
+    if let Ok(meta) = std::fs::metadata(&target) {
+        std::fs::set_permissions(&tmp, meta.permissions())?;
+    }
+    std::fs::rename(&tmp, &target)?;
     Ok(())
 }
