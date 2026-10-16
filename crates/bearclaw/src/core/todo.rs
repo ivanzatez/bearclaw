@@ -173,6 +173,15 @@ impl Todo {
     }
 }
 
+/// What every Claude session is told at start (with the brain's index, by `brain hook`): keep
+/// your todo item and sticky note current, and how.
+pub const SESSION_CONTEXT: &str = "# Your work: todo item + sticky note
+The user follows every Claude session from the bearclaw dashboard. Keep two things current there:
+- Todo item: one line saying what you are working on (e.g. \"Permission error in the agent loader\"). As soon as you know, run `bearclaw todo set \"<one line>\"`, adding `--task <Productive task URL>` when there is one. Run it again when the focus changes, and `bearclaw todo done` when the work is finished. If your first prompt names todo item #N, run `bearclaw todo claim N` instead of `set`.
+- Sticky note: up to 6 short bullets, what you are doing and what is done so far. Replace it after meaningful progress: `bearclaw sticky set \"<bullet>\" \"<bullet>\" ...`.
+Both commands find your session by themselves.
+";
+
 /// `$BEARCLAW_TODO_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/bearclaw/todo.json`.
 pub fn path() -> PathBuf {
     if let Some(p) = std::env::var_os("BEARCLAW_TODO_FILE").filter(|p| !p.is_empty()) {

@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum BrainAction {
-    /// SessionStart hook: print the brain's index for Claude (never fails)
+    /// SessionStart hook: the brain's index and the todo / sticky-note instructions (never fails)
     Hook,
     /// Create the brain folder and add the hook to ~/.claude/settings.json
     Install {
@@ -37,18 +37,20 @@ pub fn run(action: &BrainAction) -> Result<()> {
     }
 }
 
-/// Runs at the start of every Claude session, so it prints nothing rather than fail: a brain
-/// that isn't there (or can't be read) must not get in a session's way.
+/// Runs at the start of every Claude session, so nothing here can fail it: the brain's index
+/// when there is a brain, and always the todo / sticky-note instructions.
 fn hook() {
     let root = brain::root();
-    if !root.is_dir() {
-        return;
+    let mut context = String::new();
+    if root.is_dir() {
+        context.push_str(&brain::hook_context(&root, &brain::list(&root), 100));
+        context.push('\n');
     }
-    let notes = brain::list(&root);
+    context.push_str(crate::core::todo::SESSION_CONTEXT);
     let out = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": brain::hook_context(&root, &notes, 100),
+            "additionalContext": context,
         }
     });
     println!("{out}");

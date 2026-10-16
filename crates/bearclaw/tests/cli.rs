@@ -542,37 +542,42 @@ fn group_keeps_dormant_sessions() {
     assert!(a1.get("dormant").is_none());
 }
 
-// The SessionStart hook runs in every Claude session: a missing brain prints nothing and still
-// exits 0, a brain with notes hands Claude its index.
+// The SessionStart hook runs in every Claude session and never fails: without a brain it still
+// asks the session to keep its todo item and sticky note; with one it adds the brain's index.
 #[test]
 fn brain_hook_never_fails() {
     let env = common::Env::new();
     let root = env.path("brain");
     env.write_config(&serde_json::json!({"brain": {"root": root}}));
-    let out = env
-        .cmd()
-        .env("HOME", env.dir.path())
-        .args(["brain", "hook"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", common::stderr(&out));
-    assert_eq!(common::stdout(&out), "");
+    let context = |env: &common::Env| {
+        let out = env
+            .cmd()
+            .env("HOME", env.dir.path())
+            .args(["brain", "hook"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", common::stderr(&out));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("hook JSON");
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "SessionStart");
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let without = context(&env);
+    assert!(
+        without.contains("bearclaw todo set") && without.contains("bearclaw sticky set"),
+        "{without}"
+    );
+    assert!(!without.contains("# Brain"), "{without}");
 
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("deploys.md"), "# How deploys work\n").unwrap();
-    let out = env
-        .cmd()
-        .env("HOME", env.dir.path())
-        .args(["brain", "hook"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", common::stderr(&out));
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("hook JSON");
-    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "SessionStart");
-    let ctx = v["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
-    assert!(ctx.contains("How deploys work"), "{ctx}");
+    let with = context(&env);
+    assert!(
+        with.contains("How deploys work") && with.contains("bearclaw todo set"),
+        "{with}"
+    );
 }
 
 // `brain install` wires the hook into ~/.claude/settings.json without touching anything else,
