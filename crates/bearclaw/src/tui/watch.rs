@@ -1759,10 +1759,11 @@ mod tests {
         // The waiting session is counted on the Sessions tab, visible from every tab.
         assert!(s[0].contains("Sessions ⏸1"), "{:?}", s[0]);
         assert!(s[1].contains("3 live"), "{:?}", s[1]);
-        tabs.switch(Tab::Prs);
+        // `active`, not `switch`: showing a tab starts its fetch, and a test must not call GitHub.
+        tabs.active = Tab::Prs;
         let s = app_screen(120, 30, &mut tabs, &rows);
         assert!(s[0].contains("Sessions ⏸1"), "{:?}", s[0]);
-        assert!(s[1..].join("\n").contains("PRs — coming soon"), "{s:?}");
+        assert!(s[1].contains(" PRs "), "{:?}", s[1]);
         assert!(!s.join("\n").contains("3 live"), "{s:?}");
     }
 

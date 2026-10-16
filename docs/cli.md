@@ -260,6 +260,12 @@ Sessions tab:
 | `?` | help overlay |
 | `q`, Esc, Ctrl-C | quit |
 
+Other tabs (each loads in the background the first time it is shown; `r` reloads):
+
+| tab | keys |
+| --- | --- |
+| PRs | `bearclaw prs` grouped by column · ↑/↓ `j`/`k` move · Enter/`o` open in the browser |
+
 Run it in a tmux session named `bearclaw` and bind `prefix f` to `switch-client -t bearclaw` to jump back
 after focusing a session (see [setup.md](setup.md#4-tmux)).
 

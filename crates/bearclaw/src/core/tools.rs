@@ -165,9 +165,38 @@ pub fn short_hostname() -> String {
         .unwrap_or_else(|| "local".into())
 }
 
+/// Open an `http(s)` link in the default browser (`open`, else `xdg-open`). Anything else is
+/// refused: these links come from APIs, and `open` would happily run a file.
+pub fn open_url(url: &str) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("not a web link: {url:?}"));
+    }
+    let bin = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let mut child = std::process::Command::new(bin)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("{bin}: {e}"))?;
+    // Reap it off the caller's thread; the dashboard must not wait on a browser.
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_url_rejects_non_http() {
+        assert!(open_url("file:///etc/passwd").is_err());
+        assert!(open_url("javascript:alert(1)").is_err());
+        assert!(open_url("").is_err());
+    }
 
     #[test]
     fn quoting() {

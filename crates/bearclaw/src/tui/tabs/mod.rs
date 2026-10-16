@@ -4,6 +4,7 @@
 pub mod input;
 pub mod loader;
 pub mod pager;
+pub mod prs;
 
 use std::path::PathBuf;
 
@@ -209,7 +210,10 @@ impl Tabs {
     pub fn new() -> Self {
         let views: Vec<Box<dyn View>> = Tab::ALL[1..]
             .iter()
-            .map(|t| Box::new(Placeholder(t.title())) as Box<dyn View>)
+            .map(|&t| match t {
+                Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
+                _ => Box::new(Placeholder(t.title())),
+            })
             .collect();
         Tabs {
             active: Tab::Sessions,
