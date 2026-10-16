@@ -29,12 +29,13 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 | "how much usage do I have left / my limits" | `bearclaw usage` (`--json` to parse) — session (5h), weekly, per-model weekly (e.g. Fable) and extra usage, with reset times |
 | "my PRs / what should I review / what's waiting on me" | `bearclaw prs` (`--json` to parse; `--column waiting-on-me` etc.; `--refresh` to fetch now) — see Pull requests below |
 | "check out PR X / work on PR X / review PR X in a session" | `bearclaw pr checkout <pr>` / `bearclaw pr spawn <pr> "<prompt>"` — see Pull requests below |
+| "remember this / put it in the brain / what does the brain say about X" | the brain — see Brain below; `bearclaw brain path` prints its folder |
 | "what's running everywhere" | `bearclaw list --all-hosts` (add `--json`; every row carries `host`) |
 | "…on the workstation" | `bearclaw -H <host> <any command above>` — runs it on that host over ssh |
 
 `<target>` = a session's **generated title** (`upload-retry-limit`), its Claude session name (`app-f9`), a sessionId prefix, or a pid. The title is what `list` and the dashboard print as a session's identity, so what the user just read off a bearclaw view is always a usable target.
 
-**Any unambiguous fragment of a title or name works too** — you don't have to retype 30 characters. Matching walks four rungs and the *first* one with hits decides: exact (pid, whole name, whole title, sessionId prefix) → prefix (`bearclaw`) → substring (`llm`) → characters-in-order (`flt`, `fltitle`). So a name typed in full is never reinterpreted as a fuzzy match on some other session, and looseness is only reached for a query nothing tighter explains. Fragments under 3 characters don't reach the fuzzy rung.
+**Any unambiguous fragment of a title or name works too** — you don't have to retype 30 characters. Matching walks four rungs and the *first* one with hits decides: exact (pid, whole name, whole title, sessionId prefix) → prefix (`bearclaw`) → substring (`llm`) → characters-in-order (`blt`, `bltitle`). So a name typed in full is never reinterpreted as a fuzzy match on some other session, and looseness is only reached for a query nothing tighter explains. Fragments under 3 characters don't reach the fuzzy rung.
 
 **Two sessions matching at the same rung is an error, not a coin flip** — you get the candidate list back and pass a longer fragment. That's what makes fragments safe for `send` and `rename`, which type into a live Claude TUI: resolving to the wrong session there costs somebody else their turn. When relaying such an error to the user, quote the candidates.
 
@@ -176,6 +177,10 @@ A **stack** is a set of sessions — on one host or across hosts — that share 
 - **`bearclaw pr cleanup-worktrees`** lists the worktrees under `prs.worktrees` whose PR merged or closed and that are clean, pushed and unused (and why the rest stay); `--apply` removes them (and a merged PR's branch). It deletes: **show the list and confirm before `--apply`**.
 - **If your first prompt starts with "You're working on pull request …"** — you were spawned on that PR: work in the worktree it names, and use `gh pr view <n>` / `gh pr diff <n>` for the description, review comments, CI and diff.
 - The web UI's Pull requests screen does the same, and marks sessions running in a PR's worktree with a `#123` chip.
+
+## Brain
+
+The brain is a folder of markdown notes (`bearclaw brain path`; config `brain.root`, default `~/brain`) that every Claude session on this machine shares. `bearclaw brain install` creates it and adds a SessionStart hook to `~/.claude/settings.json` that hands each new session the brain's location, how to use it and its note index (`--uninstall` removes the hook). Read and write the notes with your ordinary file tools: one topic per note, `# Title` on the first line, update an existing note before creating a new one, and keep task progress and secrets out. The dashboard's Brain tab browses, searches and edits the same files.
 
 ## Scheduled jobs
 

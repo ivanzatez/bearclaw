@@ -4,8 +4,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 
 use bearclaw::cli::{
-    brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init, jobs as jobs_cmd,
-    mcp, prs as prs_cmd, repos as repos_cmd, restore, skill, stack as stack_cmds,
+    brain as brain_cmd, brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init,
+    jobs as jobs_cmd, mcp, prs as prs_cmd, repos as repos_cmd, restore, skill, stack as stack_cmds,
     tmux as tmux_cmds, usage as usage_cmd, web,
 };
 use bearclaw::core::config;
@@ -491,6 +491,12 @@ enum Commands {
         action: WebCmd,
     },
 
+    /// The brain: notes every Claude session reads and writes (hook, install, path)
+    Brain {
+        #[command(subcommand)]
+        action: brain_cmd::BrainAction,
+    },
+
     /// Manage the Claude Code skill file
     Skill {
         #[command(subcommand)]
@@ -970,6 +976,8 @@ fn placement(c: &Commands) -> Placement {
         | Commands::Exec { .. }
         | Commands::Ssh { .. }
         | Commands::Mcp { .. }
+        // The hook runs inside a Claude session: never over ssh, whatever BEARCLAW_HOST says.
+        | Commands::Brain { .. }
         | Commands::Probe => Placement::Here,
         _ => Placement::Dispatch(Scope::SelfHost),
     }
@@ -1498,6 +1506,7 @@ set one with: bearclaw config set hosts.{h}.ssh <alias>"
             })?,
         },
         Commands::Skill { action } => skill::run(&action)?,
+        Commands::Brain { action } => brain_cmd::run(&action)?,
         Commands::Mcp {
             http,
             bind,

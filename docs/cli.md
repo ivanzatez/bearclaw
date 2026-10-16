@@ -437,6 +437,21 @@ bearclaw init --yes --self laptop \
 | `--force` | overwrite an existing config without asking |
 | `--print` | print the config instead of writing it |
 
+## Brain
+
+A folder of markdown notes every Claude Code session on this machine reads and writes —
+config `brain.root`, default `~/brain`. One topic per note; the title is the first `# ` heading
+(after optional `---` frontmatter), else the file name. The dashboard's Brain tab browses it.
+
+| command | does |
+| --- | --- |
+| `bearclaw brain install` | create the folder and add a SessionStart hook (`<this binary> brain hook`) to `~/.claude/settings.json`; every other key and hook is kept, re-running is a no-op, an unparseable settings file is refused untouched |
+| `bearclaw brain install --uninstall` | remove that hook (and the `SessionStart` / `hooks` keys it leaves empty) |
+| `bearclaw brain hook` | what the hook runs: prints `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":…}}` — the brain's location, how to use it and its newest 100 note titles (≤ 8000 chars). Prints nothing and exits 0 when the folder is missing or anything fails |
+| `bearclaw brain path` | print the folder |
+
+Always runs on this machine (`-H` / `BEARCLAW_HOST` are ignored): the hook runs inside a session.
+
 ## Pull requests
 
 The open GitHub pull requests that need you, sorted into columns, cached, and joined with your

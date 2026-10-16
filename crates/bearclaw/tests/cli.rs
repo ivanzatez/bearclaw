@@ -541,3 +541,83 @@ fn group_keeps_dormant_sessions() {
     let a1 = members.iter().find(|m| m["id"] == "a1").unwrap();
     assert!(a1.get("dormant").is_none());
 }
+
+// The SessionStart hook runs in every Claude session: a missing brain prints nothing and still
+// exits 0, a brain with notes hands Claude its index.
+#[test]
+fn brain_hook_never_fails() {
+    let env = common::Env::new();
+    let root = env.path("brain");
+    env.write_config(&serde_json::json!({"brain": {"root": root}}));
+    let out = env
+        .cmd()
+        .env("HOME", env.dir.path())
+        .args(["brain", "hook"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    assert_eq!(common::stdout(&out), "");
+
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("deploys.md"), "# How deploys work\n").unwrap();
+    let out = env
+        .cmd()
+        .env("HOME", env.dir.path())
+        .args(["brain", "hook"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("hook JSON");
+    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "SessionStart");
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(ctx.contains("How deploys work"), "{ctx}");
+}
+
+// `brain install` wires the hook into ~/.claude/settings.json without touching anything else,
+// and `--uninstall` takes it back out.
+#[test]
+fn brain_install_round_trips_settings() {
+    let env = common::Env::new();
+    env.write_config(&serde_json::json!({"brain": {"root": env.path("brain")}}));
+    let settings = env.path(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(
+        &settings,
+        r#"{"model":"opus","permissions":{"allow":["Bash"]}}"#,
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        env.cmd()
+            .env("HOME", env.dir.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+
+    let out = run(&["brain", "install"]);
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    assert!(env.path("brain").is_dir());
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "opus");
+    let cmd = v["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(cmd.ends_with("brain hook"), "{cmd}");
+
+    let out = run(&["brain", "install", "--uninstall"]);
+    assert!(out.status.success(), "{}", common::stderr(&out));
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({"model":"opus","permissions":{"allow":["Bash"]}})
+    );
+
+    std::fs::write(&settings, "{ not json").unwrap();
+    let out = run(&["brain", "install"]);
+    assert!(!out.status.success());
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ not json");
+}
