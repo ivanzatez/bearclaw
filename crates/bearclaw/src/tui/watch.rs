@@ -13,8 +13,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
-    MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -914,11 +913,15 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         let detail_typing = dash.detail.as_ref().is_some_and(SessionDetail::typing);
         if !tabs.typing() && !detail_typing {
             let to = match &ev {
-                Event::Key(k) if k.kind != KeyEventKind::Release => match k.code {
-                    KeyCode::Tab => Some(tabs.active.next()),
-                    KeyCode::BackTab => Some(tabs.active.prev()),
-                    _ => None,
-                },
+                Event::Key(k) if k.kind != KeyEventKind::Release => {
+                    tabs::tab_step(*k).map(|next| {
+                        if next {
+                            tabs.active.next()
+                        } else {
+                            tabs.active.prev()
+                        }
+                    })
+                }
                 Event::Mouse(m)
                     if m.kind == MouseEventKind::Down(MouseButton::Left) && m.row == 0 =>
                 {
@@ -1566,7 +1569,7 @@ fn render_events(f: &mut ratatui::Frame, area: Rect, log: &[Ev], plan: &Plan) {
 
 fn render_help(f: &mut ratatui::Frame) {
     const BINDS: [(&str, &str); 14] = [
-        ("Tab ⇧Tab", "switch tab (or tap the bar)"),
+        ("Tab ⇧Tab", "switch tab (also ⇧← ⇧→, or tap)"),
         ("d →", "open a session: screen, brief, send"),
         ("1-9 0", "jump to that row and focus it"),
         ("⏎ ␣ l o", "focus the selected session"),

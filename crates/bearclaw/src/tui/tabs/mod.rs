@@ -143,6 +143,19 @@ pub fn hit(ranges: &[(Tab, u16, u16)], x: u16) -> Option<Tab> {
         .map(|&(t, _, _)| t)
 }
 
+/// A key that steps tabs: `Some(true)` = next (Tab, Shift-→), `Some(false)` = previous
+/// (Shift-Tab, Shift-←). Bare arrows are left to the tabs.
+pub fn tab_step(k: KeyEvent) -> Option<bool> {
+    let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+    match k.code {
+        KeyCode::Tab => Some(true),
+        KeyCode::BackTab => Some(false),
+        KeyCode::Right if shift => Some(true),
+        KeyCode::Left if shift => Some(false),
+        _ => None,
+    }
+}
+
 /// What a tab asks the loop to do after a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -285,6 +298,27 @@ mod tests {
         let (none, hits) = tab_bar(Tab::Sessions, 0, None);
         assert_eq!(width_of(&text(&none)), 0);
         assert_eq!(hit(&hits, 0), None);
+    }
+
+    #[test]
+    fn tab_and_shift_arrows_step_tabs() {
+        let key = |c, m| KeyEvent::new(c, m);
+        assert_eq!(tab_step(key(KeyCode::Tab, KeyModifiers::NONE)), Some(true));
+        assert_eq!(
+            tab_step(key(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Some(false)
+        );
+        assert_eq!(
+            tab_step(key(KeyCode::Right, KeyModifiers::SHIFT)),
+            Some(true)
+        );
+        assert_eq!(
+            tab_step(key(KeyCode::Left, KeyModifiers::SHIFT)),
+            Some(false)
+        );
+        // Bare arrows stay the tabs' own (→ opens a session, ← goes back).
+        assert_eq!(tab_step(key(KeyCode::Right, KeyModifiers::NONE)), None);
+        assert_eq!(tab_step(key(KeyCode::Left, KeyModifiers::NONE)), None);
     }
 
     #[test]

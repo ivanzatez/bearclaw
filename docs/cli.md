@@ -237,7 +237,7 @@ whose dormant list can't be fetched has nothing pruned that run.
 ### Dashboard keys (`watch`)
 
 The dashboard has tabs — **Sessions · PRs · Tasks · Usage · Brain · Memos · Settings** — on its
-first row. Tab / Shift-Tab (or a tap on the bar) switch them; on a narrow pane the bar shortens to
+first row. Tab / Shift-Tab, Shift-→ / Shift-← (or a tap on the bar) switch them; on a narrow pane the bar shortens to
 `Ses PR Tsk …`, then to `‹ Active ›` whose arrows step to the neighbouring tab. The Sessions label
 carries `⏸N` while N sessions wait for you, so it shows from every tab. Session polling and
 notifications keep running whichever tab is up. On every other tab `q` quits and Esc goes back to
