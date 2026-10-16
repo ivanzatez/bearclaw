@@ -266,6 +266,7 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 | --- | --- |
 | PRs | `bearclaw prs` grouped by column · ↑/↓ `j`/`k` move · Enter/`o` open in the browser |
 | Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter read · `e` edit in `$VISUAL`/`$EDITOR` · `n` new note (asks for a title) · Esc clears the filter, then leaves |
+| Memos | voice memos from the local web server (`GET /api/memos`; start it with `bearclaw web serve` or `web install-service` — the tab says so when it isn't up) · Enter reads a transcript |
 | Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
 | Tasks | your open [Productive](https://productive.io) tasks, due date first (overdue red) · Enter read · `o` open in the browser |
 

@@ -460,16 +460,6 @@ pub fn open(t: &Target, target: &str) -> Result<()> {
 
 // ------------------------------------------------------------------ regenerate
 
-/// This machine's web server: `hosts.<self>.web`, else `http://127.0.0.1:<web.port>`.
-pub fn local_web_base() -> String {
-    let cfg = config::get();
-    cfg.host(&cfg.self_name())
-        .and_then(|h| h.web)
-        .map(|w| w.trim().trim_end_matches('/').to_string())
-        .filter(|w| !w.is_empty())
-        .unwrap_or_else(|| format!("http://127.0.0.1:{}", cfg.web_port()))
-}
-
 pub fn path_segment(s: &str) -> String {
     s.bytes()
         .map(|b| {
@@ -517,7 +507,7 @@ pub fn regenerate(target: &str, json: bool) -> Result<()> {
             src.id
         )));
     }
-    let base = local_web_base();
+    let base = crate::core::webapi::base_url();
     let me = config::get().self_name();
     let c = regenerate_command(&base, &me, &src.id);
     if hosts::dry_run() {

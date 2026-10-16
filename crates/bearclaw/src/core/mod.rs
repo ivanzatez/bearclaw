@@ -21,3 +21,4 @@ pub mod title;
 pub mod tmux;
 pub mod tools;
 pub mod usage;
+pub mod webapi;

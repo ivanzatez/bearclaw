@@ -4,6 +4,7 @@
 pub mod brain;
 pub mod input;
 pub mod loader;
+pub mod memos;
 pub mod pager;
 pub mod prs;
 pub mod tasks;
@@ -218,6 +219,7 @@ impl Tabs {
                 Tab::Tasks => Box::new(tasks::TasksView::new()),
                 Tab::Usage => Box::new(usage::UsageView::new()),
                 Tab::Brain => Box::new(brain::BrainView::new()),
+                Tab::Memos => Box::new(memos::MemosView::new()),
                 _ => Box::new(Placeholder(t.title())),
             })
             .collect();
