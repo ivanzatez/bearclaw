@@ -1,6 +1,7 @@
 //! The dashboard's tabs: the bar on row 0, the [`View`] every non-Sessions tab implements,
 //! and the pieces they share ([`loader`], [`pager`], [`input`]).
 
+pub mod brain;
 pub mod input;
 pub mod loader;
 pub mod pager;
@@ -216,6 +217,7 @@ impl Tabs {
                 Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
                 Tab::Tasks => Box::new(tasks::TasksView::new()),
                 Tab::Usage => Box::new(usage::UsageView::new()),
+                Tab::Brain => Box::new(brain::BrainView::new()),
                 _ => Box::new(Placeholder(t.title())),
             })
             .collect();
