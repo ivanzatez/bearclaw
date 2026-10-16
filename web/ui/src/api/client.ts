@@ -1,4 +1,4 @@
-// Typed client for the fleet web HTTP API. Same origin (the server serves this UI);
+// Typed client for the bearclaw web HTTP API. Same origin (the server serves this UI);
 // in dev, Vite proxies /api to a running server (see vite.config.ts).
 import type {
   Memo,
@@ -13,7 +13,7 @@ import type {
   FileOpenResponse,
   ForgetResponse,
   FileStatResponse,
-  FleetResponse,
+  BearclawResponse,
   GroupsResponse,
   HarnessesResponse,
   Job,
@@ -120,7 +120,7 @@ type Opts = { signal?: AbortSignal }
 export const api = {
   health: (o: Opts = {}) => request<Health>('/api/health', o),
   settings: (o: Opts = {}) => request<Settings>('/api/settings', o),
-  fleet: (o: Opts = {}) => request<FleetResponse>('/api/fleet', o),
+  bearclaw: (o: Opts = {}) => request<BearclawResponse>('/api/bearclaw', o),
 
   peek: (host: string, id: string, lines = 200, o: Opts = {}) =>
     request<PeekResponse>(`${sessionPath(host, id, 'peek')}?lines=${lines}`, o),
@@ -146,9 +146,9 @@ export const api = {
   /** Replace the host's list (400 `SpawnDirsError` when invalid); `dryRun` validates only. */
   saveSpawnDirs: (host: string, spawnDirs: SpawnDirEntry[], { dryRun = false, ...o }: Opts & { dryRun?: boolean } = {}) =>
     request<SpawnDirsResponse>(`${hostPath(host)}/spawn-dirs`, { ...o, method: 'PUT', body: { spawnDirs, ...(dryRun ? { dryRun } : {}) } }),
-  /** The host's scheduled jobs (`fleet jobs --json`; each with its latest run). 501: an older CLI. */
+  /** The host's scheduled jobs (`bearclaw jobs --json`; each with its latest run). 501: an older CLI. */
   jobs: (host: string, o: Opts = {}) => request<JobsResponse>(`${hostPath(host)}/jobs`, o),
-  /** One job with all its kept runs, newest first (`fleet jobs show <name> --json`). */
+  /** One job with all its kept runs, newest first (`bearclaw jobs show <name> --json`). */
   job: (host: string, name: string, o: Opts = {}) => request<Job>(`${hostPath(host)}/jobs/${enc(name)}`, o),
   /** Start a run now (starts an agent). 409 `{ busy: true }` while a session of the job works, unless `force`. */
   runJob: (host: string, name: string, force = false, o: Opts = {}) =>
@@ -156,7 +156,7 @@ export const api = {
   /** Pause / resume a job (`jobs.<name>.enabled`). */
   setJobEnabled: (host: string, name: string, enabled: boolean, o: Opts = {}) =>
     request<JobEnabledResponse>(`${hostPath(host)}/jobs/${enc(name)}/enabled`, { ...o, method: 'POST', body: { enabled } }),
-  /** The host's git repos (`fleet repos --json --all`), its `repos` settings and its sync timer. */
+  /** The host's git repos (`bearclaw repos --json --all`), its `repos` settings and its sync timer. */
   repos: (host: string, o: Opts = {}) => request<ReposResponse>(`${hostPath(host)}/repos`, o),
   /** Replace the host's `repos` settings (400 `{ error, errors }` when invalid). */
   saveRepos: (host: string, settings: ReposSettings, o: Opts = {}) =>

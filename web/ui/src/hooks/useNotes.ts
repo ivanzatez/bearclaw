@@ -2,17 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError, api, isAbortError } from '@/api/client'
 import type { NoteFile, NotesSearch, NotesTree } from '@/api/types'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { usePoller } from '@/hooks/usePoller'
 import { indexNotes } from '@/lib/notes'
 
 const TREE_POLL_MS = 30_000
 const SEARCH_DEBOUNCE_MS = 180
 
-/** Hosts whose server has a notes explorer, self first (from /api/fleet host entries). */
+/** Hosts whose server has a notes explorer, self first (from /api/bearclaw host entries). */
 export function useNotesHosts(): { name: string; label: string | null }[] {
-  const { fleet } = useFleet()
-  return useMemo(() => (fleet?.hosts ?? []).filter((h) => h.notes).map((h) => ({ name: h.name, label: h.notes?.name ?? null })), [fleet])
+  const { bearclaw } = useBearclaw()
+  return useMemo(() => (bearclaw?.hosts ?? []).filter((h) => h.notes).map((h) => ({ name: h.name, label: h.notes?.name ?? null })), [bearclaw])
 }
 
 // Last tree per host, kept across remounts so switching screens repaints at once.

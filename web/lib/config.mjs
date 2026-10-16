@@ -1,6 +1,6 @@
-// Shared fleet config (owned by the `fleet` CLI, read here).
+// Shared bearclaw config (owned by the `bearclaw` CLI, read here).
 //
-// Path: $FLEET_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/fleet/config.json.
+// Path: $BEARCLAW_CONFIG, else ${XDG_CONFIG_HOME:-~/.config}/bearclaw/config.json.
 // Shape (v1) — see config.example.json and ARCHITECTURE.md:
 //   { version, self, defaultHost, hosts: { name: { ssh, web } },
 //     web: { port, bind, dir, ui, editor, editorSsh, quickReplies, models: [ { id, label } ],
@@ -11,7 +11,7 @@
 //            stacks: { syncMinutes } },
 //     stacks: { enabled, model },         (read by the CLI; the server only reports them)
 //     grouping: { enabled, model, host },   (enabled/model are read by the CLI)
-//     tmux, fleetBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
+//     tmux, bearclawBin, claude, spawnDirs: [ { label, paths: { host: dir } } ] }
 //
 // A missing config file is not an error: the server runs as a single local host
 // ("local", 127.0.0.1, no peers). A present-but-broken file is a hard error.
@@ -26,10 +26,10 @@ export const DEFAULT_SELF = 'local';
 export const SUPPORTED_VERSION = 1;
 export const DEFAULT_AUTONAME_MINUTES = 5;
 export const DEFAULT_GROUPING_MINUTES = 10;
-export const DEFAULT_UPLOADS_DIR = '~/.local/share/fleet/uploads';
+export const DEFAULT_UPLOADS_DIR = '~/.local/share/bearclaw/uploads';
 export const DEFAULT_UPLOAD_MAX_MB = 100;
-export const DEFAULT_MEMOS_DIR = '~/.local/share/fleet/memos';
-export const DEFAULT_MEMO_AUDIO_DIR = '~/.local/share/fleet/memo-audio';
+export const DEFAULT_MEMOS_DIR = '~/.local/share/bearclaw/memos';
+export const DEFAULT_MEMO_AUDIO_DIR = '~/.local/share/bearclaw/memo-audio';
 export const DEFAULT_UPLOAD_RETENTION_DAYS = 14;
 export const DEFAULT_STACKS_SYNC_MINUTES = 2;
 export const DEFAULT_STACKS_MODEL = 'sonnet';
@@ -47,16 +47,16 @@ export const DEFAULT_BRIEFS = Object.freeze({
   maxBriefChars: 3000, // the previous Summary + Plan fed back
 });
 
-/** Where brief files live: $FLEET_BRIEFS_DIR, else ${XDG_STATE_HOME:-~/.local/state}/fleet/briefs. */
+/** Where brief files live: $BEARCLAW_BRIEFS_DIR, else ${XDG_STATE_HOME:-~/.local/state}/bearclaw/briefs. */
 export function briefsDir(env = process.env, home = os.homedir()) {
-  if (env.FLEET_BRIEFS_DIR) return path.resolve(expandHome(env.FLEET_BRIEFS_DIR, home));
-  return path.join(fleetStateDir(env, home), 'briefs');
+  if (env.BEARCLAW_BRIEFS_DIR) return path.resolve(expandHome(env.BEARCLAW_BRIEFS_DIR, home));
+  return path.join(bearclawStateDir(env, home), 'briefs');
 }
 
-/** fleet's per-machine state: `${XDG_STATE_HOME:-~/.local/state}/fleet`. */
-export function fleetStateDir(env = process.env, home = os.homedir()) {
+/** bearclaw's per-machine state: `${XDG_STATE_HOME:-~/.local/state}/bearclaw`. */
+export function bearclawStateDir(env = process.env, home = os.homedir()) {
   const base = env.XDG_STATE_HOME ? expandHome(env.XDG_STATE_HOME, home) : path.join(home, '.local', 'state');
-  return path.join(base, 'fleet');
+  return path.join(base, 'bearclaw');
 }
 
 /** A model id typed after `--model` in a shell: letters, digits and `._[]-` only. */
@@ -89,9 +89,9 @@ export function expandHome(p, home = os.homedir()) {
 
 /** Where the shared config lives. */
 export function configPath(env = process.env, home = os.homedir()) {
-  if (env.FLEET_CONFIG) return path.resolve(expandHome(env.FLEET_CONFIG, home));
+  if (env.BEARCLAW_CONFIG) return path.resolve(expandHome(env.BEARCLAW_CONFIG, home));
   const base = env.XDG_CONFIG_HOME ? expandHome(env.XDG_CONFIG_HOME, home) : path.join(home, '.config');
-  return path.join(base, 'fleet', 'config.json');
+  return path.join(base, 'bearclaw', 'config.json');
 }
 
 /** Prepend the usual Homebrew / user bin dirs so children launched by launchd find binaries. */
@@ -104,7 +104,7 @@ export function ensurePath(env = process.env, home = os.homedir()) {
 }
 
 /**
- * A UTF-8 locale for every child (tmux, the fleet CLI, `claude -p`). launchd and similar
+ * A UTF-8 locale for every child (tmux, the bearclaw CLI, `claude -p`). launchd and similar
  * start the server with none, and then tmux escapes its `-F` output (tabs become `_`,
  * so no pane matched and tmux sessions had no handle) and mangles UTF-8 in send-keys.
  */
@@ -137,10 +137,10 @@ export function resolveBinary(name, { explicit = null, env = process.env, extraD
   return name;
 }
 
-/** `fleet` binary: FLEET_BIN env > config.fleetBin > PATH > ~/.local/bin > ~/.cargo/bin. */
-export function resolveFleetBin(raw = {}, { env = process.env, home = os.homedir(), fsImpl = fs } = {}) {
-  return resolveBinary('fleet', {
-    explicit: env.FLEET_BIN || raw.fleetBin,
+/** `bearclaw` binary: BEARCLAW_BIN env > config.bearclawBin > PATH > ~/.local/bin > ~/.cargo/bin. */
+export function resolveBearclawBin(raw = {}, { env = process.env, home = os.homedir(), fsImpl = fs } = {}) {
+  return resolveBinary('bearclaw', {
+    explicit: env.BEARCLAW_BIN || raw.bearclawBin,
     env,
     home,
     fsImpl,
@@ -194,7 +194,7 @@ export const CLASSIC_UI = 'classic';
 
 /**
  * The static UI directory:
- *   explicit path (`web.ui` / FLEET_WEB_UI, `~` expanded) → that directory;
+ *   explicit path (`web.ui` / BEARCLAW_WEB_UI, `~` expanded) → that directory;
  *   unset (or the retired `"classic"`) → <webRoot>/ui/dist; until it is built the server
  *   answers `/` with a "not built" placeholder.
  */
@@ -205,7 +205,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
 
 /**
  * Turn the raw shared config into what the server needs:
- *   { self, port, bind, peers: { name: url }, sshHosts: { name: ssh }, hostAddrs: { name: hostname }, editor, editorSsh, hosts: [names], fleetBin, tmux, claude,
+ *   { self, port, bind, peers: { name: url }, sshHosts: { name: ssh }, hostAddrs: { name: hostname }, editor, editorSsh, hosts: [names], bearclawBin, tmux, claude,
  *     spawnDirs: [{ label, path }], uiDir, quickReplies, models: [{ id, label }], autoName: { enabled, intervalMinutes },
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
@@ -252,14 +252,14 @@ export function normalizeConfig(
 
   let port = DEFAULT_PORT;
   if (web.port != null) port = parsePort(web.port, 'config.web.port');
-  const envPort = env.FLEET_WEB_PORT || env.PORT;
-  if (envPort) port = parsePort(envPort, 'FLEET_WEB_PORT/PORT');
+  const envPort = env.BEARCLAW_WEB_PORT || env.PORT;
+  if (envPort) port = parsePort(envPort, 'BEARCLAW_WEB_PORT/PORT');
 
   // No config → loopback only (there is no auth). With a config, default to all
   // interfaces so peers on the tailnet can reach this host.
   let bind = found ? '0.0.0.0' : '127.0.0.1';
   if (typeof web.bind === 'string' && web.bind) bind = web.bind;
-  if (env.FLEET_WEB_BIND) bind = env.FLEET_WEB_BIND;
+  if (env.BEARCLAW_WEB_BIND) bind = env.BEARCLAW_WEB_BIND;
 
   // web.editor: the "Open in editor" link scheme (lib/editor.mjs); null hides it.
   let editor = DEFAULT_EDITOR;
@@ -270,7 +270,7 @@ export function normalizeConfig(
   // web.editorSsh: the ssh destination other machines use for this one in editor links.
   const editorSsh = typeof web.editorSsh === 'string' && web.editorSsh.trim() ? web.editorSsh.trim() : null;
 
-  const uiRaw = env.FLEET_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
+  const uiRaw = env.BEARCLAW_WEB_UI || (typeof web.ui === 'string' && web.ui ? web.ui : null);
   const uiDir = resolveUiDir(uiRaw, { webRoot, home });
 
   const spawnDirs = spawnDirsFor(raw.spawnDirs, self.trim(), home);
@@ -307,7 +307,7 @@ export function normalizeConfig(
     });
   }
 
-  // web.autoName: the periodic `fleet name --all --apply` pass (lib/autoname.mjs).
+  // web.autoName: the periodic `bearclaw name --all --apply` pass (lib/autoname.mjs).
   const an = web.autoName == null ? {} : web.autoName;
   if (!isObject(an)) throw new Error('config.web.autoName must be an object { enabled, intervalMinutes }');
   if (an.enabled != null && typeof an.enabled !== 'boolean') throw new Error('config.web.autoName.enabled must be true or false');
@@ -318,11 +318,11 @@ export function normalizeConfig(
     intervalMinutes = m;
   }
   let autoNameEnabled = an.enabled === true; // opt-in: it types /rename into sessions and spends model calls
-  if (env.FLEET_WEB_AUTONAME != null && env.FLEET_WEB_AUTONAME !== '') autoNameEnabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_AUTONAME);
+  if (env.BEARCLAW_WEB_AUTONAME != null && env.BEARCLAW_WEB_AUTONAME !== '') autoNameEnabled = !/^(0|false|off|no)$/i.test(env.BEARCLAW_WEB_AUTONAME);
   const autoName = { enabled: autoNameEnabled, intervalMinutes };
 
-  // web.grouping: the periodic `fleet group` pass (lib/grouping.mjs); grouping.host: which
-  // host's server runs it for the whole fleet (peers proxy /api/groups there).
+  // web.grouping: the periodic `bearclaw group` pass (lib/grouping.mjs); grouping.host: which
+  // host's server runs it for the whole bearclaw (peers proxy /api/groups there).
   const wg = web.grouping == null ? {} : web.grouping;
   if (!isObject(wg)) throw new Error('config.web.grouping must be an object { enabled, intervalMinutes }');
   if (wg.enabled != null && typeof wg.enabled !== 'boolean') throw new Error('config.web.grouping.enabled must be true or false');
@@ -336,7 +336,7 @@ export function normalizeConfig(
   if (!isObject(g)) throw new Error('config.grouping must be an object { enabled, model, host }');
   if (g.host != null && (typeof g.host !== 'string' || !g.host.trim())) throw new Error('config.grouping.host must be a host name');
   let groupingEnabled = wg.enabled === true; // opt-in: it spends model calls
-  if (env.FLEET_WEB_GROUPING != null && env.FLEET_WEB_GROUPING !== '') groupingEnabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_GROUPING);
+  if (env.BEARCLAW_WEB_GROUPING != null && env.BEARCLAW_WEB_GROUPING !== '') groupingEnabled = !/^(0|false|off|no)$/i.test(env.BEARCLAW_WEB_GROUPING);
   const groupingHost = g.host == null ? null : g.host.trim();
   // With grouping.host set, only that host runs the pass — one source of truth.
   const grouping = {
@@ -443,10 +443,10 @@ export function normalizeConfig(
     if (!Number.isFinite(n) || n < min) throw new Error(`config.web.briefs.${key} must be a number >= ${min}: ${wb[key]}`);
     briefs[key] = n;
   }
-  if (env.FLEET_WEB_BRIEFS != null && env.FLEET_WEB_BRIEFS !== '') briefs.enabled = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_BRIEFS);
+  if (env.BEARCLAW_WEB_BRIEFS != null && env.BEARCLAW_WEB_BRIEFS !== '') briefs.enabled = !/^(0|false|off|no)$/i.test(env.BEARCLAW_WEB_BRIEFS);
   briefs.dir = briefsDir(env, home);
 
-  // web.stacks: the background `fleet stack sync` (lib/stacks.mjs); top-level `stacks` is the
+  // web.stacks: the background `bearclaw stack sync` (lib/stacks.mjs); top-level `stacks` is the
   // CLI's (`enabled` = may call the model when a stack is created, `model`), reported in /api/settings.
   const ws = web.stacks == null ? {} : web.stacks;
   if (!isObject(ws)) throw new Error('config.web.stacks must be an object { syncMinutes }');
@@ -457,13 +457,13 @@ export function normalizeConfig(
     syncMinutes = m;
   }
   let stacksSync = true;
-  if (env.FLEET_WEB_STACKS != null && env.FLEET_WEB_STACKS !== '') stacksSync = !/^(0|false|off|no)$/i.test(env.FLEET_WEB_STACKS);
+  if (env.BEARCLAW_WEB_STACKS != null && env.BEARCLAW_WEB_STACKS !== '') stacksSync = !/^(0|false|off|no)$/i.test(env.BEARCLAW_WEB_STACKS);
   // The CLI validates its own keys; here a bad value only falls back to the default.
   const st = isObject(raw.stacks) ? raw.stacks : {};
   const stacksModel = typeof st.model === 'string' && MODEL_ID_RE.test(st.model) ? st.model : DEFAULT_STACKS_MODEL;
   const stacks = { sync: stacksSync, syncMinutes, generate: st.enabled !== false, model: stacksModel };
 
-  // web.operator: the voice operator — a Claude session that watches the fleet (lib/operator.mjs).
+  // web.operator: the voice operator — a Claude session that watches the bearclaw (lib/operator.mjs).
   const wo = web.operator == null ? {} : web.operator;
   if (!isObject(wo)) throw new Error('config.web.operator must be an object { hosts, model, voice, clearIdleMinutes }');
   if (wo.hosts != null && (!Array.isArray(wo.hosts) || !wo.hosts.length || wo.hosts.some((h) => typeof h !== 'string' || !h.trim()))) {
@@ -481,14 +481,14 @@ export function normalizeConfig(
     voice: wo.voice ?? null,
     // Idle this long → /clear, a fresh conversation (0 = never).
     clearIdleMinutes: wo.clearIdleMinutes != null ? Number(wo.clearIdleMinutes) : 60,
-    dir: path.join(fleetStateDir(env, home), 'operator'),
+    dir: path.join(bearclawStateDir(env, home), 'operator'),
   };
 
   // restore.onBoot: at start, bring back what the last boot left dormant (lib/dormant.mjs).
   const rs = raw.restore == null ? {} : raw.restore;
   if (!isObject(rs)) throw new Error('config.restore must be an object { onBoot }');
   if (rs.onBoot != null && typeof rs.onBoot !== 'boolean') throw new Error('config.restore.onBoot must be true or false');
-  const restore = { onBoot: rs.onBoot === true, markerFile: path.join(fleetStateDir(env, home), 'web-restored-boot') };
+  const restore = { onBoot: rs.onBoot === true, markerFile: path.join(bearclawStateDir(env, home), 'web-restored-boot') };
 
   return {
     self: self.trim(),
@@ -500,8 +500,8 @@ export function normalizeConfig(
     editor,
     editorSsh,
     hosts: [self.trim(), ...Object.keys(peers)],
-    fleetBin: resolveFleetBin(raw, { env, home, fsImpl }),
-    tmux: resolveBinary('tmux', { explicit: env.FLEET_TMUX || raw.tmux, env, home, fsImpl }),
+    bearclawBin: resolveBearclawBin(raw, { env, home, fsImpl }),
+    tmux: resolveBinary('tmux', { explicit: env.BEARCLAW_TMUX || raw.tmux, env, home, fsImpl }),
     claude: typeof raw.claude === 'string' && raw.claude ? expandHome(raw.claude, home) : 'claude',
     // How each harness launches in a spawned session (`claude`, `harnesses.<id>.command`).
     launchers: {
@@ -535,23 +535,23 @@ export function loadConfig({ env = process.env, home = os.homedir(), webRoot = n
   try {
     text = fsImpl.readFileSync(file, 'utf8');
   } catch (err) {
-    if (err?.code !== 'ENOENT') throw new Error(`cannot read fleet config ${file}: ${err.message}`);
+    if (err?.code !== 'ENOENT') throw new Error(`cannot read bearclaw config ${file}: ${err.message}`);
   }
   if (text != null) {
     found = true;
     try {
       raw = JSON.parse(text);
     } catch (err) {
-      throw new Error(`fleet config ${file} is not valid JSON: ${err.message}`);
+      throw new Error(`bearclaw config ${file} is not valid JSON: ${err.message}`);
     }
   } else {
-    log.warn?.(`[config] no fleet config at ${file} — running as a single local host. Run \`fleet init\` to set up hosts.`);
+    log.warn?.(`[config] no bearclaw config at ${file} — running as a single local host. Run \`bearclaw init\` to set up hosts.`);
   }
   let cfg;
   try {
     cfg = normalizeConfig(raw, { env, home, found, webRoot, fsImpl });
   } catch (err) {
-    throw new Error(`invalid fleet config ${file}: ${err.message}`);
+    throw new Error(`invalid bearclaw config ${file}: ${err.message}`);
   }
   return { ...cfg, configFile: found ? file : null };
 }

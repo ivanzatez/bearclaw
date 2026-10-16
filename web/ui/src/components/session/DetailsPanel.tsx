@@ -49,7 +49,7 @@ export interface DetailsPanelProps {
   onClosed: () => void
   /** The brief at the top of the panel. */
   brief: Omit<BriefSectionProps, 'desktop' | 'cancelEditRef'>
-  /** "Open in VS Code / Cursor" for the session's checkout (Brief.editorUrl, else the fleet row's). */
+  /** "Open in VS Code / Cursor" for the session's checkout (Brief.editorUrl, else the bearclaw row's). */
   editor?: { url: string | null | undefined; kind?: string | null }
   /** Desktop panel: the ✕ in the top-right corner. */
   onClose?: () => void
@@ -301,7 +301,7 @@ export function DetailsPanel(p: DetailsPanelProps & { variant: 'drawer' | 'panel
               <div className="py-1.5">
                 <Row
                   label={attachLink ? 'Attach' : 'Attach command'}
-                  hint={attachCmd ? (attachLink ? 'Opens an iTerm tab attached to its tmux session' : 'Run in a terminal on any fleet host') : 'Only for tmux sessions — this one is an iTerm tab'}
+                  hint={attachCmd ? (attachLink ? 'Opens an iTerm tab attached to its tmux session' : 'Run in a terminal on any bearclaw host') : 'Only for tmux sessions — this one is an iTerm tab'}
                 >
                   <div className="flex gap-1.5">
                     <Button variant={attachLink ? 'ghost' : 'outline'} className="h-9 px-3" disabled={!attachCmd} aria-label="Copy attach command" title="Copy attach command" onClick={() => attachCmd && void copyWithToast(attachCmd)}>

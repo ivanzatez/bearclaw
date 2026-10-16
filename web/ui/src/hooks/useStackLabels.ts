@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 
 import { api } from '@/api/client'
 import type { StackView } from '@/api/types'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { MAX_STACK_LABEL, STACK_LABEL_TTL_MS, shownStackLabel, stackErrorMessage, type PendingStackLabel } from '@/lib/stacks'
 
 let pending: ReadonlyMap<string, PendingStackLabel> = new Map()
@@ -37,13 +37,13 @@ export function useStackLabel(host: string | null | undefined, id: string | null
 
 /**
  * `rename(host, id, label)`: shows the new label everywhere at once, POSTs the rename, then
- * refreshes the fleet (now, and once more when the server's snapshot has certainly been
- * rebuilt); the override is dropped once the fleet shows the label (or after a TTL). A failure
+ * refreshes the bearclaw (now, and once more when the server's snapshot has certainly been
+ * rebuilt); the override is dropped once the bearclaw shows the label (or after a TTL). A failure
  * rolls back and toasts. Resolves the updated StackView, or null when it failed. The caller
  * checks `stackLabelChanged` first.
  */
 export function useRenameStack(): (host: string, id: string, label: string) => Promise<StackView | null> {
-  const { refresh } = useFleet()
+  const { refresh } = useBearclaw()
   return useCallback(
     async (host: string, id: string, raw: string) => {
       const label = raw.trim().slice(0, MAX_STACK_LABEL)

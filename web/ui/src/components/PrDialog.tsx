@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { editorLabel } from '@/lib/brief'
 import { copyText } from '@/lib/clipboard'
 import { shortCwd } from '@/lib/format'
@@ -43,7 +43,7 @@ export function PrDialog({
   onChanged: () => void
 }) {
   const [, navigate] = useLocation()
-  const { applyFleet } = useFleet()
+  const { applyBearclaw } = useBearclaw()
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState<null | 'spawn' | 'checkout'>(null)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +97,7 @@ export function PrDialog({
           tmuxSession: res.spawn?.tmuxSession ?? name,
         },
         {
-          onFleet: applyFleet,
+          onBearclaw: applyBearclaw,
           onFound: (s) => {
             toast.success(`${name} is up`, { id, description: undefined })
             navigate(sessionHref(s))

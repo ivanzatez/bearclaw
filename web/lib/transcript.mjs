@@ -9,7 +9,7 @@ import { QUESTION_TOOL, normalizeQuestions, questionOutcome, questionsText } fro
 
 export const MAX_TAIL_BYTES = 6 * 1024 * 1024;
 
-/** Mirror of the fleet CLI's `encode_cwd`: `/` and `.` become `-`. */
+/** Mirror of the bearclaw CLI's `encode_cwd`: `/` and `.` become `-`. */
 export function encodeCwd(cwd) {
   return String(cwd).replace(/[/.]/g, '-');
 }
@@ -301,7 +301,7 @@ const PARSERS = { claude: parseTranscript, codex: parseCodexTranscript, pi: pars
 
 /**
  * Cached transcript reader. `messages(session, limit)` returns the last `limit` chat
- * messages of a `fleet list --json` session object ({ session_id, cwd }).
+ * messages of a `bearclaw list --json` session object ({ session_id, cwd }).
  */
 export function createTranscriptReader({ home = claudeHome(), maxBytes = MAX_TAIL_BYTES } = {}) {
   const cache = new Map(); // sessionId -> { file, size, mtimeMs, messages, truncated }

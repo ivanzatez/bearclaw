@@ -1,5 +1,5 @@
 // Jobs screen (`#/jobs`): scheduled agent sessions per host (docs/cli.md → Jobs) — pure helpers.
-import type { FleetResponse, Job, JobRun, JobRunSession, Session } from '@/api/types'
+import type { BearclawResponse, Job, JobRun, JobRunSession, Session } from '@/api/types'
 
 export const isJobsLocation = (location: string) => location === '/jobs' || location.startsWith('/jobs/')
 
@@ -20,7 +20,7 @@ export const jobKey = (j: { host?: string; name: string }) => `${j.host ?? ''}/$
 const pad2 = (n: number) => String(n).padStart(2, '0')
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** "today 07:00" / "tomorrow 07:00" / "yesterday 07:00" / "Mon 12.10. 07:00" (like `fleet jobs`). */
+/** "today 07:00" / "tomorrow 07:00" / "yesterday 07:00" / "Mon 12.10. 07:00" (like `bearclaw jobs`). */
 export function whenLabel(ms: number | null | undefined, now = Date.now()): string {
   const t = Number(ms)
   if (ms == null || !Number.isFinite(t) || t <= 0) return ''
@@ -94,9 +94,9 @@ export function runTree(run: Pick<JobRun, 'sessions'>): RunTreeRow[] {
   return out
 }
 
-/** The live session behind a run's tmux session: same host + tmux session in /api/fleet. */
-export function liveSession(fleet: FleetResponse | null | undefined, host: string, tmuxSession: string): Session | null {
-  const entry = fleet?.hosts?.find((h) => h.name === host)
+/** The live session behind a run's tmux session: same host + tmux session in /api/bearclaw. */
+export function liveSession(bearclaw: BearclawResponse | null | undefined, host: string, tmuxSession: string): Session | null {
+  const entry = bearclaw?.hosts?.find((h) => h.name === host)
   const s = entry?.sessions?.find((x) => x.tmux_session === tmuxSession)
   return s ? { ...s, host: s.host ?? host } : null
 }

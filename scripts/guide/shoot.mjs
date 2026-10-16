@@ -8,7 +8,7 @@ const INV = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000001' // Invoice ro
 const CHK = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000002' // waiting on a permission
 const RL = '#/s/workstation/a1b2c3d4-1111-4000-8000-000000000003'  // waiting on an AskUserQuestion
 const ONB = '#/s/devbox/b2c3d4e5-2222-4000-8000-000000000001'      // in a stack across two hosts
-const MUTE = { 'fleet.operator.speak': 'false' }                    // no read-aloud toast on the operator
+const MUTE = { 'bearclaw.operator.speak': 'false' }                    // no read-aloud toast on the operator
 const focus = `document.querySelector('textarea[aria-label=Message]').focus()`
 const scrollTo = (t) => `(() => { const e = [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && e.textContent?.trim() === ${JSON.stringify(t)}); e?.scrollIntoView({ block: 'start' }); return !!e })()`
 const scrollAll = (last) => `(() => { const a = [...document.querySelectorAll('*')].filter((e) => e.scrollHeight > e.clientHeight + 50 && getComputedStyle(e).overflowY !== 'visible'); ${last ? 'a.slice(-1)' : 'a'}.forEach((e) => { e.scrollTop = 1e5 }) })()`
@@ -18,13 +18,13 @@ const MOBILE = { w: 390, h: 844, mobile: true, scale: 3 }
 const SHOTS = [
   // desktop
   ['d-session', DESKTOP, async (p) => { await p.go(U + INV) }],
-  ['d-term', DESKTOP, async (p) => { await p.go(U + INV, { 'fleet.detailMode': 'term' }) }],
+  ['d-term', DESKTOP, async (p) => { await p.go(U + INV, { 'bearclaw.detailMode': 'term' }) }],
   ['d-palette', DESKTOP, async (p) => { await p.go(U + INV); await p.key('k', { meta: true }); await p.type('onb') }],
   ['d-help', DESKTOP, async (p) => { await p.go(U + INV); await p.key('?', { meta: true, shift: true }) }],
   ['d-new', DESKTOP, async (p) => { await p.go(U + INV); await p.key('o', { meta: true, shift: true, ms: 1200 }) }],
   ['d-question', DESKTOP, async (p) => { await p.go(U + RL) }],
-  ['d-board-wide', { w: 1800, h: 520 }, async (p) => { await p.go(U + '#/', { 'fleet.view': 'board' }) }],
-  ['d-board-flyout', DESKTOP, async (p) => { await p.go(U + INV, { 'fleet.view': 'board' }) }],
+  ['d-board-wide', { w: 1800, h: 520 }, async (p) => { await p.go(U + '#/', { 'bearclaw.view': 'board' }) }],
+  ['d-board-flyout', DESKTOP, async (p) => { await p.go(U + INV, { 'bearclaw.view': 'board' }) }],
   ['d-file', DESKTOP, async (p) => { await p.go(U + INV); await p.click('=docs/billing/rounding.md', { ms: 1500 }) }],
   ['d-stack', DESKTOP, async (p) => { await p.go(U + ONB); await p.click('StackBrief', { ms: 1500 }) }],
   ['d-prs', DESKTOP, async (p) => { await p.go(U + '#/prs') }],
@@ -39,21 +39,21 @@ const SHOTS = [
   ['d-operator', DESKTOP, async (p) => { await p.go(U + '#/operator', MUTE) }],
   ['d-complete', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(focus); await p.type('/', 1200) }],
   ['d-undo', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(focus); await p.type('Also add a test for KWD (3 decimals).'); await p.key('Enter', { ms: 900 }) }],
-  ['d-scratch', DESKTOP, async (p) => { await p.go(U + INV, { 'fleet.scratchpad': 'TODO today\n- review acme-web#1310\n- answer rate limits question\n- ship invoice fix before 16:00\n\nfleet -H workstation enter invoice' }); await p.key('s', { meta: true, shift: true, ms: 1000 }) }],
-  ['d-dusk', { ...DESKTOP, dark: true }, async (p) => { await p.go(U + INV, { 'fleet.palette': 'dusk', 'fleet.theme': 'dark' }) }],
-  ['d-earth', DESKTOP, async (p) => { await p.go(U + '#/', { 'fleet.palette': 'earth', 'fleet.view': 'board' }) }],
+  ['d-scratch', DESKTOP, async (p) => { await p.go(U + INV, { 'bearclaw.scratchpad': 'TODO today\n- review acme-web#1310\n- answer rate limits question\n- ship invoice fix before 16:00\n\nbearclaw -H workstation enter invoice' }); await p.key('s', { meta: true, shift: true, ms: 1000 }) }],
+  ['d-dusk', { ...DESKTOP, dark: true }, async (p) => { await p.go(U + INV, { 'bearclaw.palette': 'dusk', 'bearclaw.theme': 'dark' }) }],
+  ['d-earth', DESKTOP, async (p) => { await p.go(U + '#/', { 'bearclaw.palette': 'earth', 'bearclaw.view': 'board' }) }],
   ['d-dormant', DESKTOP, async (p) => { await p.go(U + '#/'); await p.eval(scrollAll(false)); await p.sleep(700) }],
   ['d-details-bottom', DESKTOP, async (p) => { await p.go(U + INV); await p.eval(scrollAll(true)); await p.sleep(700) }],
   // mobile
   ['m-list', MOBILE, async (p) => { await p.go(U + '#/') }],
   ['m-filters', MOBILE, async (p) => { await p.go(U + '#/'); await p.swipe(195, 40, 195, 200) }],
-  ['m-board', MOBILE, async (p) => { await p.go(U + '#/', { 'fleet.view': 'board' }) }],
+  ['m-board', MOBILE, async (p) => { await p.go(U + '#/', { 'bearclaw.view': 'board' }) }],
   ['m-more', MOBILE, async (p) => { await p.go(U + '#/'); await p.click('More') }],
   ['m-new', MOBILE, async (p) => { await p.go(U + '#/'); await p.click('New session', { ms: 1200 }) }],
   ['m-chat', MOBILE, async (p) => { await p.go(U + INV) }],
   ['m-chips', MOBILE, async (p) => { await p.go(U + CHK); await p.click('Show quick replies', { ms: 900 }) }],
   ['m-question', MOBILE, async (p) => { await p.go(U + RL) }],
-  ['m-term', MOBILE, async (p) => { await p.go(U + INV, { 'fleet.detailMode': 'term' }) }],
+  ['m-term', MOBILE, async (p) => { await p.go(U + INV, { 'bearclaw.detailMode': 'term' }) }],
   ['m-details', MOBILE, async (p) => { await p.go(U + INV); await p.click('=More', { ms: 900 }) }],
   ['m-stack', MOBILE, async (p) => { await p.go(U + ONB); await p.click('StackBrief', { ms: 1500 }) }],
   ['m-operator', MOBILE, async (p) => { await p.go(U + '#/operator', MUTE) }],
@@ -62,7 +62,7 @@ const SHOTS = [
   ['m-jobs', MOBILE, async (p) => { await p.go(U + '#/jobs') }],
   ['m-notes', MOBILE, async (p) => { await p.go(U + '#/notes/devbox/projects/billing.md') }],
   ['m-usage', MOBILE, async (p) => { await p.go(U + '#/usage') }],
-  ['m-earth-dark', { ...MOBILE, dark: true }, async (p) => { await p.go(U + '#/', { 'fleet.palette': 'earth', 'fleet.theme': 'dark' }) }],
+  ['m-earth-dark', { ...MOBILE, dark: true }, async (p) => { await p.go(U + '#/', { 'bearclaw.palette': 'earth', 'bearclaw.theme': 'dark' }) }],
 ]
 
 const only = process.argv.slice(2)

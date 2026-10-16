@@ -36,7 +36,7 @@ const chipClass = cn(
 
 export function ListScreen() {
   const now = useNow(1000)
-  const { fleet, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view, hostCounts, summary, unreachable, note } =
+  const { bearclaw, error, query, setQuery, status, setStatus, setHostFilter, hosts, hostNames, host, view, hostCounts, summary, unreachable, note } =
     useSessionList(now)
   const [newOpen, setNewOpen] = useState(false)
   const [, navigate] = useLocation()
@@ -44,7 +44,7 @@ export function ListScreen() {
   const settings = useSettings()
   const board = mode === 'board'
   const groups = useGroups(board)
-  const { columns } = useBoardColumns(board, view.sessions, groups.groups, fleet, host, query)
+  const { columns } = useBoardColumns(board, view.sessions, groups.groups, bearclaw, host, query)
   // The filter rows live in a drawer under the search field, closed by default: swipe down on
   // the header (or tap the handle) opens it, swipe up closes it. Active filters show on the handle.
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -73,8 +73,8 @@ export function ListScreen() {
       <ScreenHeader>
         <div onTouchStart={onTouchStart} onTouchEnd={(e) => onTouchEnd(e, false)}>
         <div className="flex min-h-8 items-center gap-0.5 min-[400px]:gap-1 sm:gap-2.5">
-          <h1 className="mr-1 shrink-0 text-xl font-bold tracking-tight sm:mr-0">Fleet</h1>
-          {fleet ? (
+          <h1 className="mr-1 shrink-0 text-xl font-bold tracking-tight sm:mr-0">Bearclaw</h1>
+          {bearclaw ? (
             <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-muted-foreground tabular-nums" aria-label="Status summary">
               {summary.waiting > 0 ? (
                 <span className="flex items-center gap-1 font-semibold text-status-waiting">
@@ -173,11 +173,11 @@ export function ListScreen() {
           aria-label="Filter by status"
           className="no-scrollbar mt-2 w-full overflow-x-auto"
         >
-          {visibleStatusFilters(fleet ? view.counts : null, status).map((f) => (
+          {visibleStatusFilters(bearclaw ? view.counts : null, status).map((f) => (
             <ToggleGroupItem key={f.id} value={f.id} className={chipClass} title={f.id === 'scheduled' ? 'Sessions started by scheduled jobs' : undefined}>
               <StatusFilterLabel filter={f} />
               <span className="text-xs text-dimmer tabular-nums group-data-[state=on]/toggle:text-accent-foreground/70">
-                {fleet ? view.counts[f.id] : ''}
+                {bearclaw ? view.counts[f.id] : ''}
               </span>
             </ToggleGroupItem>
           ))}
@@ -252,7 +252,7 @@ export function ListScreen() {
           {error ? (
             <Alert variant="destructive" className="my-2">
               <AlertDescription>
-                {fleet ? `Refresh failed: ${error} — showing last known data` : `Could not reach fleet web: ${error}`}
+                {bearclaw ? `Refresh failed: ${error} — showing last known data` : `Could not reach bearclaw web: ${error}`}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -265,7 +265,7 @@ export function ListScreen() {
             </Alert>
           ))}
 
-          {!fleet ? (
+          {!bearclaw ? (
             <SessionListSkeleton />
           ) : board && columns.length > 0 ? (
             <GroupedList columns={columns} now={now} />
@@ -276,11 +276,11 @@ export function ListScreen() {
               ))}
             </div>
           ) : unreachable.length === 0 ? (
-            <EmptyState anySessions={allSessions(fleet).length > 0} />
+            <EmptyState anySessions={allSessions(bearclaw).length > 0} />
           ) : null}
 
-          {fleet ? <DormantSection now={now} host={host} query={query} className="mt-6" /> : null}
-          {fleet ? <ClosedSection now={now} host={host} query={query} className="mt-4" /> : null}
+          {bearclaw ? <DormantSection now={now} host={host} query={query} className="mt-6" /> : null}
+          {bearclaw ? <ClosedSection now={now} host={host} query={query} className="mt-4" /> : null}
         </div>
       </main>
 
@@ -291,7 +291,7 @@ export function ListScreen() {
           <a
             href="#/operator"
             aria-label="Talk to the operator"
-            title="Operator — talk to the fleet"
+            title="Operator — talk to the bearclaw"
             className="grid size-12 place-items-center rounded-full border bg-background text-foreground shadow-lg transition-transform active:scale-95"
           >
             <MicIcon className="size-5" />

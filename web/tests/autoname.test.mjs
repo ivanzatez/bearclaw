@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAutoNamer, createSpawnNamer, parseNameOutput } from '../lib/autoname.mjs';
-import { createFleetCli } from '../lib/fleet-cli.mjs';
+import { createBearclawCli } from '../lib/bearclaw-cli.mjs';
 
 test('parseNameOutput splits renamed / tmux / held / errors', () => {
   const out = [
@@ -24,17 +24,17 @@ test('parseNameOutput splits renamed / tmux / held / errors', () => {
   assert.deepEqual(parseNameOutput('no sessions still carry a Claude-derived name — nothing to rename').renamed, []);
 });
 
-test('fleet CLI nameAll runs `fleet name --all --apply` (tmux synced by the CLI) with NO_COLOR (dry run: `-n name --all`)', async () => {
+test('bearclaw CLI nameAll runs `bearclaw name --all --apply` (tmux synced by the CLI) with NO_COLOR (dry run: `-n name --all`)', async () => {
   const calls = [];
   const run = async (bin, args, opts) => (calls.push({ bin, args, opts }), { stdout: 'x', stderr: '' });
-  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
   assert.deepEqual(await cli.nameAll(), { stdout: 'x', stderr: '' });
   assert.deepEqual(calls[0].args, ['name', '--all', '--apply']);
-  assert.equal(calls[0].bin, '/x/fleet');
+  assert.equal(calls[0].bin, '/x/bearclaw');
   assert.equal(calls[0].opts.env.NO_COLOR, '1');
   await cli.nameAll({ dryRun: true });
   assert.deepEqual(calls[1].args, ['-n', 'name', '--all']);
-  const missing = createFleetCli({ run: async () => { throw Object.assign(new Error('spawn'), { code: 'ENOENT' }); } });
+  const missing = createBearclawCli({ run: async () => { throw Object.assign(new Error('spawn'), { code: 'ENOENT' }); } });
   await assert.rejects(missing.nameAll(), /not found/);
 });
 
@@ -75,11 +75,11 @@ test('start schedules a first run after the initial delay, stop cancels it', asy
   assert.equal(an.lastRun.reason, 'scheduled');
 });
 
-test('fleet CLI nameOne runs `fleet name <id> --apply` with NO_COLOR', async () => {
+test('bearclaw CLI nameOne runs `bearclaw name <id> --apply` with NO_COLOR', async () => {
   const calls = [];
-  const cli = createFleetCli({ run: async (bin, args, opts) => (calls.push([bin, args, opts.env.NO_COLOR]), { stdout: 'a  →  b\n', stderr: '' }) });
+  const cli = createBearclawCli({ run: async (bin, args, opts) => (calls.push([bin, args, opts.env.NO_COLOR]), { stdout: 'a  →  b\n', stderr: '' }) });
   const out = await cli.nameOne({ target: 'abc-123' });
-  assert.deepEqual(calls[0], ['fleet', ['name', 'abc-123', '--apply'], '1']);
+  assert.deepEqual(calls[0], ['bearclaw', ['name', 'abc-123', '--apply'], '1']);
   assert.equal(out.stdout, 'a  →  b\n');
 });
 

@@ -16,7 +16,7 @@ test('speechText drops what cannot be read aloud and unwraps markdown', () => {
   const md = [
     '## Stanje',
     '',
-    '- **fleet** radi na `operator` ekranu',
+    '- **bearclaw** radi na `operator` ekranu',
     '- vidi [PR](https://github.com/x/y/pull/1) i https://example.com/a',
     '',
     '```js',
@@ -26,7 +26,7 @@ test('speechText drops what cannot be read aloud and unwraps markdown', () => {
     '|---|---|',
     'id aaaaaaaa-0000-0000-0000-000000000001 gotov',
   ].join('\n');
-  assert.equal(speechText(md), 'Stanje\nfleet radi na operator ekranu\nvidi PR i\nid gotov');
+  assert.equal(speechText(md), 'Stanje\nbearclaw radi na operator ekranu\nvidi PR i\nid gotov');
   assert.equal(speechText(''), '');
   const long = speechText('riječ '.repeat(2000));
   assert.ok(long.length <= SPEAK_MAX_CHARS + 1 && long.endsWith('…'));
@@ -63,7 +63,7 @@ test('apiBase: loopback for a wildcard bind, the address otherwise', () => {
 });
 
 function tmpConfig(t, extra = {}) {
-  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-operator-'));
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-operator-'));
   t.after(() => fs.rmSync(state, { recursive: true, force: true }));
   return normalizeConfig({ self: 'laptop', web: { operator: { model: 'claude-sonnet-5', ...extra } } }, { env: { XDG_STATE_HOME: state }, home: '/home/tester' });
 }
@@ -74,15 +74,15 @@ test('operator: prepare writes the workspace, ensure starts it once, then finds 
   const dir = config.operator.dir;
   let sessions = [];
   const spawns = [];
-  const fleet = { localHost: async () => ({ ok: true, sessions }) };
+  const bearclaw = { localHost: async () => ({ ok: true, sessions }) };
   const spawner = { spawn: async (req) => (spawns.push(req), { tmuxSession: req.name }) };
-  const op = createOperator({ config, fleet, spawner });
+  const op = createOperator({ config, bearclaw, spawner });
 
   assert.deepEqual(await op.status(), { host: 'laptop', dir, session: null });
   const r = await op.ensure();
   assert.deepEqual(r, { host: 'laptop', dir, session: null, started: true, tmuxSession: OPERATOR_NAME });
   assert.deepEqual(spawns, [{ name: OPERATOR_NAME, dir, prompt: '', nameGiven: true, model: 'claude-sonnet-5', harness: 'claude' }]);
-  assert.match(fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8'), /Fleet operator/);
+  assert.match(fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8'), /Bearclaw operator/);
   assert.ok(JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8')).permissions.allow.includes('Bash(./api:*)'));
   assert.ok(fs.statSync(path.join(dir, 'api')).mode & 0o100, 'the api helper is executable');
 
@@ -107,10 +107,10 @@ test('config: web.operator is validated', () => {
 
 test('routes: /api/speak streams mp3, /api/operator finds or starts, settings report both', async (t) => {
   const config = tmpConfig(t);
-  const fleet = { localHost: async () => ({ ok: true, sessions: [] }), invalidate() {} };
+  const bearclaw = { localHost: async () => ({ ok: true, sessions: [] }), invalidate() {} };
   const spawner = { spawn: async (req) => ({ tmuxSession: req.name }) };
   const speaker = { enabled: async () => true, voice: 'alloy', speak: async (text) => Buffer.from(`mp3:${text}`) };
-  const api = createApi({ config, fleet, backend: {}, transcripts: {}, spawner, speaker, operator: createOperator({ config, fleet, spawner }), warmFleet: false });
+  const api = createApi({ config, bearclaw, backend: {}, transcripts: {}, spawner, speaker, operator: createOperator({ config, bearclaw, spawner }), warmBearclaw: false });
   const jsonReq = (method, body) => Object.assign(Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []), { method, headers: { 'content-type': 'application/json' } });
 
   const settings = await api(jsonReq('GET'), new URL('http://x/api/settings'));
@@ -129,7 +129,7 @@ test('routes: /api/speak streams mp3, /api/operator finds or starts, settings re
   const status = await api(jsonReq('GET'), new URL('http://x/api/operator'));
   assert.equal(status.body.session, null);
 
-  const bare = createApi({ config, fleet, backend: {}, transcripts: {}, spawner, warmFleet: false });
+  const bare = createApi({ config, bearclaw, backend: {}, transcripts: {}, spawner, warmBearclaw: false });
   await assert.rejects(bare(jsonReq('POST', { text: 'x' }), new URL('http://x/api/speak')), { status: 501 });
   await assert.rejects(bare(jsonReq('GET'), new URL('http://x/api/operator')), { status: 501 });
 });
@@ -150,7 +150,7 @@ test('operator: stamp marks its row; tick clears an operator idle for an hour, o
   const sent = [];
   const operator = createOperator({
     config,
-    fleet: { localHost: async () => ({ ok: true, sessions }) },
+    bearclaw: { localHost: async () => ({ ok: true, sessions }) },
     spawner: {},
     backend: { send: async (s, text) => void sent.push([s.session_id, text]) },
     now: () => t0,
@@ -175,7 +175,7 @@ test('operator: stamp marks its row; tick clears an operator idle for an hour, o
 });
 
 test('/api/operator: the first answering host of web.operator.hosts', async (t) => {
-  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-operator-'));
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-operator-'));
   t.after(() => fs.rmSync(state, { recursive: true, force: true }));
   const config = normalizeConfig(
     { self: 'officeshed', hosts: { laptop: { web: 'http://laptop:1' }, homeshed: { web: 'http://homeshed:1' } }, web: { operator: { hosts: ['laptop', 'homeshed', 'officeshed'] } } },
@@ -187,9 +187,9 @@ test('/api/operator: the first answering host of web.operator.hosts', async (t) 
     if (base === 'http://laptop:1') return { status: 502, body: { error: 'unreachable' } };
     return { status: 200, body: { host: 'homeshed', session: { session_id: 'h' } } };
   };
-  const fleet = { localHost: async () => ({ ok: true, sessions: [] }), invalidate() {} };
-  const operator = createOperator({ config, fleet, spawner: {} });
-  const api = createApi({ config, fleet, backend: {}, transcripts: {}, spawner: {}, operator, proxyToPeer, warmFleet: false });
+  const bearclaw = { localHost: async () => ({ ok: true, sessions: [] }), invalidate() {} };
+  const operator = createOperator({ config, bearclaw, spawner: {} });
+  const api = createApi({ config, bearclaw, backend: {}, transcripts: {}, spawner: {}, operator, proxyToPeer, warmBearclaw: false });
   const req = (method) => Object.assign(Readable.from([]), { method, headers: {} });
 
   const r = await api(req('GET'), new URL('http://x/api/operator'));

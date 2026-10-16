@@ -39,7 +39,7 @@ import { Sidebar, SidebarRail } from '@/components/desktop/Sidebar'
 import { NewSessionDialog } from '@/components/NewSessionDrawer'
 import { StatusDot } from '@/components/StatusDot'
 import { Kbd } from '@/components/ui/kbd'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { useBoardColumns, useGroups, useViewMode } from '@/hooks/useGroups'
 import { useNotesHosts, useNotesTree } from '@/hooks/useNotes'
 import { WIDE_QUERY } from '@/hooks/useMediaQuery'
@@ -103,7 +103,7 @@ const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false :
 export function DesktopShell() {
   const now = useNow(1000)
   const list = useSessionList(now)
-  const { fleet, refresh, applyFleet } = useFleet()
+  const { bearclaw, refresh, applyBearclaw } = useBearclaw()
   const { setTheme, setPalette } = useTheme()
   const [location, navigate] = useLocation()
   const [match, params] = useRoute('/s/:host/:id')
@@ -121,13 +121,13 @@ export function DesktopShell() {
   const notesHosts = useNotesHosts()
   const selected = match ? { host: params.host, id: params.id } : null
   const selectedKey = selected ? `${selected.host}/${selected.id}` : null
-  const selectedSession = selected ? findSession(fleet, selected.host, selected.id) : null
+  const selectedSession = selected ? findSession(bearclaw, selected.host, selected.id) : null
 
-  const [sidebarRaw, setSidebarRaw] = usePersistentState<string>('fleet.sidebar', '1', (r) => (parseBool01(r) === undefined ? undefined : r))
+  const [sidebarRaw, setSidebarRaw] = usePersistentState<string>('bearclaw.sidebar', '1', (r) => (parseBool01(r) === undefined ? undefined : r))
   const sidebarOpen = sidebarRaw === '1'
-  const [sidebarW, setSidebarW] = usePersistentState<number>('fleet.sidebarWidth', SIDEBAR_DEFAULT_W, (r) => clampSidebarWidth(Number(r)))
+  const [sidebarW, setSidebarW] = usePersistentState<number>('bearclaw.sidebarWidth', SIDEBAR_DEFAULT_W, (r) => clampSidebarWidth(Number(r)))
   const [inspectorRaw, setInspectorRaw] = usePersistentState<string>(
-    'fleet.inspector',
+    'bearclaw.inspector',
     typeof window !== 'undefined' && window.matchMedia?.(WIDE_QUERY).matches ? '1' : '0',
     (r) => (parseBool01(r) === undefined ? undefined : r),
   )
@@ -136,14 +136,14 @@ export function DesktopShell() {
   const toggleSidebar = () => setSidebarRaw(sidebarOpen ? '0' : '1')
   const toggleInspector = () => setInspectorRaw(inspector ? '0' : '1')
 
-  // List | Board (`fleet.view`). Board: the grouped Kanban replaces the sidebar; an open
+  // List | Board (`bearclaw.view`). Board: the grouped Kanban replaces the sidebar; an open
   // session is a flyout over its right edge (the board never relayouts), so ↑/↓, Enter and
   // Esc work the same way.
   const [mode, setMode] = useViewMode()
   const board = mode === 'board'
   const toggleView = () => setMode(board ? 'list' : 'board')
   const groups = useGroups(board)
-  const { columns, moveColumn } = useBoardColumns(board, list.view.sessions, groups.groups, fleet, list.host, list.query)
+  const { columns, moveColumn } = useBoardColumns(board, list.view.sessions, groups.groups, bearclaw, list.host, list.query)
   // The cursor walks the sessions in on-screen order: the list, or the board column by column.
   const ordered = useMemo(() => (board ? boardOrder(columns) : list.view.sessions), [board, columns, list.view.sessions])
 
@@ -218,14 +218,14 @@ export function DesktopShell() {
     if (next && document.activeElement?.closest('[data-session-list]')) setFocusReq((r) => ({ to: 'row', key: next, n: (r?.n ?? 0) + 1 }))
   }
 
-  // --- document title: "(2) name · Fleet" -------------------------------------
+  // --- document title: "(2) name · Bearclaw" -------------------------------------
   const waiting = list.summary.waiting
   const { title: selectedTitle } = useSessionTitle(selectedSession, selectedKey ?? undefined)
   useEffect(() => {
     const name = selectedSession ? selectedTitle : ''
-    document.title = `${waiting > 0 ? `(${waiting}) ` : ''}${name ? `${name} · ` : ''}Fleet`
+    document.title = `${waiting > 0 ? `(${waiting}) ` : ''}${name ? `${name} · ` : ''}Bearclaw`
   }, [waiting, selectedSession, selectedTitle])
-  useEffect(() => () => void (document.title = 'Fleet'), [])
+  useEffect(() => () => void (document.title = 'Bearclaw'), [])
 
   // --- keyboard ----------------------------------------------------------------
   const dialogOpen = newOpen || paletteOpen || helpOpen
@@ -249,7 +249,7 @@ export function DesktopShell() {
       .kill(s.host, s.session_id)
       .then((res) => {
         toast.success(`Closed ${res.name || name}`, { id: pending, description: String(res.terminal || 'done').replace(/-/g, ' ') })
-        if (fleet) applyFleet(withoutSession(fleet, s.host, s.session_id))
+        if (bearclaw) applyBearclaw(withoutSession(bearclaw, s.host, s.session_id))
         setTimeout(refresh, 2500)
         if (selectedKey === key) navigate('/', { replace: true })
       })
@@ -375,7 +375,7 @@ export function DesktopShell() {
       if (anyDialog() && action !== 'palette' && !(action === 'help' && dialogRef.current.help && !dialogRef.current.others)) return
       if (runRef.current(action, target)) e.preventDefault()
     }
-    // Fleet.app's native menu (New Session ⌘N — a combo browsers keep for themselves).
+    // Bearclaw.app's native menu (New Session ⌘N — a combo browsers keep for themselves).
     const onCommand = (e: Event) => {
       const action = (e as CustomEvent<unknown>).detail as ShortcutAction
       if (!APP_COMMANDS.includes(action) || anyDialog()) return
@@ -404,7 +404,7 @@ export function DesktopShell() {
     drag.current = null
   }
 
-  // --- board flyout: width pref (`fleet.flyoutWidth`, 0 = default share), bounded by the board --
+  // --- board flyout: width pref (`bearclaw.flyoutWidth`, 0 = default share), bounded by the board --
   const boardAreaRef = useRef<HTMLDivElement>(null)
   const [boardW, setBoardW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
   useEffect(() => {
@@ -414,7 +414,7 @@ export function DesktopShell() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [board])
-  const [flyoutPref, setFlyoutPref] = usePersistentState<number>('fleet.flyoutWidth', 0, (r) => {
+  const [flyoutPref, setFlyoutPref] = usePersistentState<number>('bearclaw.flyoutWidth', 0, (r) => {
     const n = Number(r)
     return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined
   })
@@ -435,7 +435,7 @@ export function DesktopShell() {
   }
 
   // --- palette actions -----------------------------------------------------------
-  const paletteSessions = useMemo(() => allSessions(fleet).sort(byLastActivity), [fleet])
+  const paletteSessions = useMemo(() => allSessions(bearclaw).sort(byLastActivity), [bearclaw])
   const attachCmd = sessionAttachCommand(selectedSession)
   const attachLink = canAttachInApp() ? sessionAttachLink(selectedSession) : null
   const editorUrl = selectedSession?.editorUrl ?? null

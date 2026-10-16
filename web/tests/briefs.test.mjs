@@ -31,12 +31,12 @@ import { editorUrl, editorViewer, withBriefEditor } from '../lib/editor.mjs';
 import { run } from '../lib/run.mjs';
 import { createApi } from '../lib/api.mjs';
 import { createHttpServer } from '../lib/app.mjs';
-import { createFleet } from '../lib/fleet.mjs';
-import { createFleetCli } from '../lib/fleet-cli.mjs';
+import { createBearclaw } from '../lib/bearclaw.mjs';
+import { createBearclawCli } from '../lib/bearclaw-cli.mjs';
 
 const SID = 'aaaaaaaa-1111-2222-3333-444444444444';
 
-function tmpdir(t, prefix = 'fleet-briefs-') {
+function tmpdir(t, prefix = 'bearclaw-briefs-') {
   const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   t.after(() => fs.rmSync(d, { recursive: true, force: true }));
   return d;
@@ -568,7 +568,7 @@ test('briefs: store writes atomically and rejects ids that are not file names', 
 // ------------------------------------------------------------------ claude -p runner
 
 function fakeClaude(t, script) {
-  const dir = tmpdir(t, 'fleet-fake-claude-');
+  const dir = tmpdir(t, 'bearclaw-fake-claude-');
   const bin = path.join(dir, 'claude');
   fs.writeFileSync(bin, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
   return { bin, dir };
@@ -576,7 +576,7 @@ function fakeClaude(t, script) {
 
 test('claude runner: flags, prompt on stdin, neutral cwd', async (t) => {
   const { bin, dir } = fakeClaude(t, `echo "ARGS $*" > "$(dirname "$0")/args"; pwd > "$(dirname "$0")/cwd"; cat > "$(dirname "$0")/stdin"; printf '## Summary\\nok\\n'`);
-  const neutral = tmpdir(t, 'fleet-neutral-');
+  const neutral = tmpdir(t, 'bearclaw-neutral-');
   const ask = createClaudeAsk({ bin, run, cwd: neutral });
   assert.equal(await ask({ prompt: 'hello brief', model: 'haiku' }), '## Summary\nok\n');
   assert.equal(fs.readFileSync(path.join(dir, 'args'), 'utf8').trim(), 'ARGS -p --model haiku --no-session-persistence --strict-mcp-config --disallowed-tools Bash,Edit,Write,Read,WebFetch,WebSearch,Task');
@@ -612,7 +612,7 @@ test('gitInfo: branch and checkout root from one rev-parse', async () => {
 test('config: web.briefs defaults (off), overrides, validation, env, dir', () => {
   const home = '/home/tester';
   const d = normalizeConfig({}, { env: {}, home });
-  assert.deepEqual(d.briefs, { ...DEFAULT_BRIEFS, dir: '/home/tester/.local/state/fleet/briefs' });
+  assert.deepEqual(d.briefs, { ...DEFAULT_BRIEFS, dir: '/home/tester/.local/state/bearclaw/briefs' });
   assert.equal(d.briefs.enabled, false);
   const c = normalizeConfig({ web: { briefs: { enabled: true, model: 'claude-haiku-4-5', minIntervalMs: 60000, maxCallsPerHour: 3 } } }, { env: {}, home });
   assert.equal(c.briefs.enabled, true);
@@ -623,10 +623,10 @@ test('config: web.briefs defaults (off), overrides, validation, env, dir', () =>
   assert.throws(() => normalizeConfig({ web: { briefs: { enabled: 'yes' } } }, { env: {}, home }), /briefs\.enabled/);
   assert.throws(() => normalizeConfig({ web: { briefs: { model: 'haiku; rm -rf' } } }, { env: {}, home }), /briefs\.model/);
   assert.throws(() => normalizeConfig({ web: { briefs: { maxCallsPerHour: -1 } } }, { env: {}, home }), /maxCallsPerHour/);
-  assert.equal(normalizeConfig({}, { env: { FLEET_WEB_BRIEFS: '1' }, home }).briefs.enabled, true);
-  assert.equal(normalizeConfig({ web: { briefs: { enabled: true } } }, { env: { FLEET_WEB_BRIEFS: 'off' }, home }).briefs.enabled, false);
-  assert.equal(briefsDir({ FLEET_BRIEFS_DIR: '~/b' }, home), '/home/tester/b');
-  assert.equal(briefsDir({ XDG_STATE_HOME: '/state' }, home), '/state/fleet/briefs');
+  assert.equal(normalizeConfig({}, { env: { BEARCLAW_WEB_BRIEFS: '1' }, home }).briefs.enabled, true);
+  assert.equal(normalizeConfig({ web: { briefs: { enabled: true } } }, { env: { BEARCLAW_WEB_BRIEFS: 'off' }, home }).briefs.enabled, false);
+  assert.equal(briefsDir({ BEARCLAW_BRIEFS_DIR: '~/b' }, home), '/home/tester/b');
+  assert.equal(briefsDir({ XDG_STATE_HOME: '/state' }, home), '/state/bearclaw/briefs');
 });
 
 // ------------------------------------------------------------------ HTTP
@@ -658,8 +658,8 @@ test('api: GET / PUT / regenerate, locally and through a peer; gone sessions kee
       { self: name, hosts: { laptop: { ssh: null, web: hosts.laptop.url }, workstation: { ssh: 'workstation', web: hosts.workstation.url } } },
       { env: {}, home: '/home/tester' },
     );
-    const cli = createFleetCli({ run: async () => ({ stdout: JSON.stringify(name === 'workstation' ? sessions : []), stderr: '' }) });
-    const api = createApi({ config, fleet: createFleet({ cli, self: name, ttlMs: 0 }), backend: {}, transcripts: {}, spawner: {}, briefs: name === 'workstation' ? briefs : null, warmFleet: false });
+    const cli = createBearclawCli({ run: async () => ({ stdout: JSON.stringify(name === 'workstation' ? sessions : []), stderr: '' }) });
+    const api = createApi({ config, bearclaw: createBearclaw({ cli, self: name, ttlMs: 0 }), backend: {}, transcripts: {}, spawner: {}, briefs: name === 'workstation' ? briefs : null, warmBearclaw: false });
     hosts[name].setHandle(api);
   }
   const base = `${hosts.laptop.url}/api/hosts/workstation/sessions/${SID.slice(0, 8)}/brief`;
@@ -679,8 +679,8 @@ test('api: GET / PUT / regenerate, locally and through a peer; gone sessions kee
   assert.equal(body.editorUrl, `vscode://vscode-remote/ssh-remote+workstation${fx.cwd}`);
   const direct = await (await fetch(`${hosts.workstation.url}/api/hosts/workstation/sessions/${SID}/brief`)).json();
   assert.equal(direct.editorUrl, `vscode://file${fx.cwd}`);
-  const fleetBody = await (await fetch(`${hosts.laptop.url}/api/fleet`)).json();
-  const row = fleetBody.hosts.find((h) => h.name === 'workstation').sessions[0];
+  const bearclawBody = await (await fetch(`${hosts.laptop.url}/api/bearclaw`)).json();
+  const row = bearclawBody.hosts.find((h) => h.name === 'workstation').sessions[0];
   assert.equal(row.editorUrl, `vscode://vscode-remote/ssh-remote+workstation${fx.cwd}`, 'session rows carry the link too');
 
   res = await fetch(base, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ markdown: '## Summary\nhand written\n\n## Plan\n- [ ] one\n' }) });

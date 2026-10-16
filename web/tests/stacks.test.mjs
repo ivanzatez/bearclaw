@@ -1,5 +1,5 @@
-// Session stacks on the web side: lib/fleet-cli.mjs stack calls, lib/stacks.mjs (errors, sync,
-// the post-spawn join) and the /api/hosts/:host/stacks… routes. The `fleet` CLI and the spawner
+// Session stacks on the web side: lib/bearclaw-cli.mjs stack calls, lib/stacks.mjs (errors, sync,
+// the post-spawn join) and the /api/hosts/:host/stacks… routes. The `bearclaw` CLI and the spawner
 // are faked; the peer pair runs on 127.0.0.1 ephemeral ports.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,8 +10,8 @@ import { PassThrough } from 'node:stream';
 
 import { createApi } from '../lib/api.mjs';
 import { createHttpServer } from '../lib/app.mjs';
-import { createFleet } from '../lib/fleet.mjs';
-import { createFleetCli } from '../lib/fleet-cli.mjs';
+import { createBearclaw } from '../lib/bearclaw.mjs';
+import { createBearclawCli } from '../lib/bearclaw-cli.mjs';
 import { normalizeConfig } from '../lib/config.mjs';
 import { HttpError } from '../lib/http.mjs';
 import { compactStack, createStacks, resolveStackSpawnDir, stackHttpError, stampForeign, validateStackEdit, withStackEditor } from '../lib/stacks.mjs';
@@ -22,7 +22,7 @@ const UPDATED = '2026-09-29T12:00:00.000Z';
 
 /** The StackView fixture (docs/architecture.md → Session stacks), rooted at `absCwd`. */
 function stackView({ absCwd, host = 'laptop' } = {}) {
-  const file = `/home/tester/.local/state/fleet/stacks/${STACK_ID}.md`;
+  const file = `/home/tester/.local/state/bearclaw/stacks/${STACK_ID}.md`;
   return {
     host,
     id: STACK_ID,
@@ -35,9 +35,9 @@ function stackView({ absCwd, host = 'laptop' } = {}) {
     generatedAt: '2026-09-29T10:00:05.000Z',
     editedAt: null,
     contextLine: `You're running in the session stack with shared context: ${file}.`,
-    remoteContextLine: `You're running in the session stack with shared context: stack ${STACK_ID} on host ${host}. Read it with \`fleet -H ${host} stack show ${STACK_ID}\` and update it with \`fleet -H ${host} stack set ${STACK_ID}\` (the whole markdown on stdin; \`fleet -H ${host} stack show ${STACK_ID} --json\` has it under \`markdown\`).`,
+    remoteContextLine: `You're running in the session stack with shared context: stack ${STACK_ID} on host ${host}. Read it with \`bearclaw -H ${host} stack show ${STACK_ID}\` and update it with \`bearclaw -H ${host} stack set ${STACK_ID}\` (the whole markdown on stdin; \`bearclaw -H ${host} stack show ${STACK_ID} --json\` has it under \`markdown\`).`,
     members: [
-      { session: SRC_ID, host, name: 'login-redirect', added: '2026-09-29T10:00:00.000Z', closed: null, live: true, status: 'idle', briefPath: `/home/tester/.local/state/fleet/briefs/${SRC_ID}.md`, briefExists: false },
+      { session: SRC_ID, host, name: 'login-redirect', added: '2026-09-29T10:00:00.000Z', closed: null, live: true, status: 'idle', briefPath: `/home/tester/.local/state/bearclaw/briefs/${SRC_ID}.md`, briefExists: false },
     ],
     markdown: `---\nstack: ${STACK_ID}\nlabel: Login redirect fix\n---\n## Summary\nFixing the login redirect.\n`,
     body: '## Summary\nFixing the login redirect.\n',
@@ -48,7 +48,7 @@ function stackView({ absCwd, host = 'laptop' } = {}) {
 const cliError = (code, stderr, stdout = '') => Object.assign(new Error(stderr || `exit ${code}`), { code, stderr, stdout });
 
 /**
- * A fake host: `run` answers `fleet list --json` from `sessions` and `fleet --local stack …`
+ * A fake host: `run` answers `bearclaw list --json` from `sessions` and `bearclaw --local stack …`
  * from the fixture; the spawner records the request and makes the new session appear in the
  * list (by tmux name), like a real spawn does a few seconds later.
  */
@@ -60,7 +60,7 @@ function fakeHost(self, { dir }) {
   const run = async (bin, args, opts = {}) => {
     calls.push({ args, opts });
     if (args[0] === 'list') return { stdout: JSON.stringify(sessions), stderr: '' };
-    assert.deepEqual(args.slice(0, 2), ['--local', 'stack'], `unexpected fleet call ${args.join(' ')}`);
+    assert.deepEqual(args.slice(0, 2), ['--local', 'stack'], `unexpected bearclaw call ${args.join(' ')}`);
     assert.equal(args.at(-1), '--json');
     const [sub, ...rest] = args.slice(2, -1);
     const out = (v) => ({ stdout: JSON.stringify(v), stderr: '' });
@@ -107,8 +107,8 @@ function fakeHost(self, { dir }) {
         throw cliError(2, `error: unrecognized subcommand '${sub}'`);
     }
   };
-  const cli = createFleetCli({ run });
-  const fleet = createFleet({ cli, self, ttlMs: 0 });
+  const cli = createBearclawCli({ run });
+  const bearclaw = createBearclaw({ cli, self, ttlMs: 0 });
   const spawner = {
     spawn: async (req) => {
       calls.push({ spawn: req });
@@ -121,7 +121,7 @@ function fakeHost(self, { dir }) {
   const logs = [];
   const stacks = createStacks({
     cli,
-    listSessions: async () => (await fleet.localHost({ force: true })).sessions,
+    listSessions: async () => (await bearclaw.localHost({ force: true })).sessions,
     joinDelaysMs: [0, 0, 0],
     sleep: async () => {},
     log: (l) => logs.push(l),
@@ -134,11 +134,11 @@ function fakeHost(self, { dir }) {
     return p;
   };
   const stackCalls = () => calls.filter((c) => c.args?.[1] === 'stack').map((c) => c.args.slice(2, -1));
-  return { calls, cli, fleet, spawner, killer, stacks, joins, logs, view, sessions, stackCalls, backend: {}, transcripts: {} };
+  return { calls, cli, bearclaw, spawner, killer, stacks, joins, logs, view, sessions, stackCalls, backend: {}, transcripts: {} };
 }
 
 function tempTree(t) {
-  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-stacks-')));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-stacks-')));
   const cwd = path.join(base, 'project');
   fs.mkdirSync(path.join(cwd, 'sub'), { recursive: true });
   fs.mkdirSync(path.join(base, 'other'));
@@ -150,7 +150,7 @@ function solo(t, { autoName = false, spawnNamer = null } = {}) {
   const { base, cwd } = tempTree(t);
   const host = fakeHost('laptop', { dir: cwd });
   const config = normalizeConfig({ self: 'laptop', spawnDirs: [{ path: path.join(base, 'other') }], web: { autoName: { enabled: autoName } } }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, spawnNamer, warmFleet: false });
+  const api = createApi({ config, ...host, spawnNamer, warmBearclaw: false });
   const call = async (method, pathname, body) => {
     const req = Object.assign(new PassThrough(), { method, headers: {} });
     req.end(body == null ? '' : JSON.stringify(body));
@@ -164,11 +164,11 @@ function solo(t, { autoName = false, spawnNamer = null } = {}) {
   return { host, api, call, base, cwd };
 }
 
-// --- lib/fleet-cli.mjs ------------------------------------------------------------------
+// --- lib/bearclaw-cli.mjs ------------------------------------------------------------------
 
-test('fleet CLI stack calls: `fleet --local stack <sub> … --json`, markdown on stdin, 150 s for ensure', async () => {
+test('bearclaw CLI stack calls: `bearclaw --local stack <sub> … --json`, markdown on stdin, 150 s for ensure', async () => {
   const calls = [];
-  const cli = createFleetCli({ run: async (bin, args, opts) => (calls.push({ args, opts }), { stdout: '{"ok":true}', stderr: '' }), bin: '/x/fleet' });
+  const cli = createBearclawCli({ run: async (bin, args, opts) => (calls.push({ args, opts }), { stdout: '{"ok":true}', stderr: '' }), bin: '/x/bearclaw' });
   await cli.stackList();
   await cli.stackShow(STACK_ID);
   await cli.stackSet(STACK_ID, '# md', UPDATED);
@@ -200,14 +200,14 @@ test('fleet CLI stack calls: `fleet --local stack <sub> … --json`, markdown on
   assert.equal(calls[0].opts.env.NO_COLOR, '1');
 });
 
-test('fleet CLI stack errors carry exitCode, the stdout report and `missing` for an old CLI', async () => {
+test('bearclaw CLI stack errors carry exitCode, the stdout report and `missing` for an old CLI', async () => {
   let err = cliError(3, 'Error: the stack changed', '{"error":"changed","updated":"x"}');
-  const cli = createFleetCli({ run: async () => { throw err; } });
+  const cli = createBearclawCli({ run: async () => { throw err; } });
   const e1 = await cli.stackSet(STACK_ID, 'x', UPDATED).catch((e) => e);
   assert.equal(e1.exitCode, 3);
   assert.deepEqual(e1.report, { error: 'changed', updated: 'x' });
   assert.equal(e1.message, 'the stack changed');
-  err = cliError(2, "error: unrecognized subcommand 'stack'\n\nUsage: fleet …");
+  err = cliError(2, "error: unrecognized subcommand 'stack'\n\nUsage: bearclaw …");
   const e2 = await cli.stackList().catch((e) => e);
   assert.equal(e2.missing, true);
   assert.equal(stackHttpError(e2).status, 501);
@@ -301,14 +301,14 @@ test('the background sync: the first tick always runs; then only while a listed 
   await s.tick();
   assert.equal(s.status().known, 0);
   assert.deepEqual(await s.tick(), { ran: false });
-  assert.deepEqual(inputs, [null, null, null, null, null], 'no merged fleet attached: a plain sync');
-  // Attached: the merged fleet goes in as --input; a failing source means a plain sync.
-  s.attach({ fleetBody: async () => ({ hosts: [{ name: 'laptop', ok: true, sessions: [] }] }) });
+  assert.deepEqual(inputs, [null, null, null, null, null], 'no merged bearclaw attached: a plain sync');
+  // Attached: the merged bearclaw goes in as --input; a failing source means a plain sync.
+  s.attach({ bearclawBody: async () => ({ hosts: [{ name: 'laptop', ok: true, sessions: [] }] }) });
   rows = [{ session_id: 'a', stack: { id: STACK_ID, label: 'x' } }];
   await s.tick();
   assert.deepEqual(inputs.at(-1), { hosts: [{ name: 'laptop', ok: true, sessions: [] }] });
   assert.equal(s.status().lastSync.merged, true);
-  s.attach({ fleetBody: async () => { throw new Error('peers down'); } });
+  s.attach({ bearclawBody: async () => { throw new Error('peers down'); } });
   await s.tick();
   assert.equal(inputs.at(-1), null);
   assert.equal(s.status().lastSync.merged, false);
@@ -319,7 +319,7 @@ test('the background sync: the first tick always runs; then only while a listed 
   off.start();
   await new Promise((r) => setTimeout(r, 30));
   off.stop();
-  assert.equal(syncs, before, 'FLEET_WEB_STACKS=0: no background sync');
+  assert.equal(syncs, before, 'BEARCLAW_WEB_STACKS=0: no background sync');
   const on = createStacks({ cli, listSessions: async () => rows, initialDelayMs: 1, syncIntervalMs: 60 * 1000 });
   on.start();
   await new Promise((r) => setTimeout(r, 30));
@@ -327,10 +327,10 @@ test('the background sync: the first tick always runs; then only while a listed 
   assert.equal(syncs, before + 1, 'first run after initialDelayMs');
 });
 
-test('config: web.stacks.syncMinutes (default 2), FLEET_WEB_STACKS=0, stacks.model passthrough', () => {
+test('config: web.stacks.syncMinutes (default 2), BEARCLAW_WEB_STACKS=0, stacks.model passthrough', () => {
   const d = normalizeConfig({}, { env: {}, home: '/home/tester' });
   assert.deepEqual(d.stacks, { sync: true, syncMinutes: 2, generate: true, model: 'sonnet' });
-  const c = normalizeConfig({ web: { stacks: { syncMinutes: 5 } }, stacks: { enabled: false, model: 'haiku' } }, { env: { FLEET_WEB_STACKS: '0' }, home: '/home/tester' });
+  const c = normalizeConfig({ web: { stacks: { syncMinutes: 5 } }, stacks: { enabled: false, model: 'haiku' } }, { env: { BEARCLAW_WEB_STACKS: '0' }, home: '/home/tester' });
   assert.deepEqual(c.stacks, { sync: false, syncMinutes: 5, generate: false, model: 'haiku' });
   assert.throws(() => normalizeConfig({ web: { stacks: { syncMinutes: 0 } } }, { env: {}, home: '/home/tester' }), /syncMinutes/);
   assert.equal(normalizeConfig({ stacks: { model: 'bad model;' } }, { env: {}, home: '/home/tester' }).stacks.model, 'sonnet', "the CLI's key: bad → default, never a startup error");
@@ -565,7 +565,7 @@ test('health reports stacks.lastSync; settings reports stacks { enabled, model }
   assert.equal(h.body.stacks.sync, true);
   const s = await call('GET', '/api/settings');
   assert.deepEqual(s.body.stacks, { enabled: true, model: 'sonnet', generate: true });
-  const bare = createApi({ config: normalizeConfig({ self: 'laptop' }, { env: {}, home: '/home/tester' }), fleet: host.fleet, warmFleet: false });
+  const bare = createApi({ config: normalizeConfig({ self: 'laptop' }, { env: {}, home: '/home/tester' }), bearclaw: host.bearclaw, warmBearclaw: false });
   await assert.rejects(bare({ method: 'GET', headers: {} }, new URL('http://x/api/hosts/laptop/stacks')), (e) => e.status === 501);
 });
 
@@ -590,7 +590,7 @@ test('stack routes are proxied once to the peer; the asking server builds the ed
       { self: name, hosts: { laptop: { web: urls.laptop }, workstation: { web: urls.workstation, ssh: 'ws' } }, spawnDirs: [{ path: cwd }] },
       { env: {}, home: '/home/tester' },
     );
-    handles[name] = createApi({ config, ...host, warmFleet: false });
+    handles[name] = createApi({ config, ...host, warmBearclaw: false });
   }
   const json = async (method, url, body) => {
     const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -621,7 +621,7 @@ test('stack routes are proxied once to the peer; the asking server builds the ed
   assert.equal((await json('GET', `${urls.laptop}/api/hosts/workstation/stacks?local=1`)).status, 404, 'never chained');
 });
 
-test('a sibling on another host: the peer spawns it with the remote context line, the home host adds it, every merged fleet shows it in the stack', async (t) => {
+test('a sibling on another host: the peer spawns it with the remote context line, the home host adds it, every merged bearclaw shows it in the stack', async (t) => {
   const { cwd } = tempTree(t);
   const hosts = { laptop: fakeHost('laptop', { dir: cwd }), workstation: fakeHost('workstation', { dir: cwd }) };
   const urls = {};
@@ -631,14 +631,14 @@ test('a sibling on another host: the peer spawns it with the remote context line
     urls[name] = await listen(server);
     t.after(() => server.close());
   }
-  const peerSessions = (name) => fetch(`${urls[name]}/api/fleet?local=1`).then((r) => r.json()).then((b) => b.hosts[0].sessions);
+  const peerSessions = (name) => fetch(`${urls[name]}/api/bearclaw?local=1`).then((r) => r.json()).then((b) => b.hosts[0].sessions);
   for (const [name, host] of Object.entries(hosts)) {
     const config = normalizeConfig(
       { self: name, hosts: { laptop: { web: urls.laptop }, workstation: { web: urls.workstation, ssh: 'ws' } }, spawnDirs: [{ path: cwd }] },
       { env: {}, home: '/home/tester' },
     );
-    handles[name] = createApi({ config, ...host, warmFleet: false });
-    host.stacks.attach({ fleetBody: () => handles[name].buildFleet(), peerSessions });
+    handles[name] = createApi({ config, ...host, warmBearclaw: false });
+    host.stacks.attach({ bearclawBody: () => handles[name].buildBearclaw(), peerSessions });
   }
   const json = async (method, url, body) => {
     const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -673,16 +673,16 @@ test('a sibling on another host: the peer spawns it with the remote context line
   assert.equal(input.hosts[0].name, 'workstation');
   assert.equal(input.hosts[0].sessions[0].session_id, joined.session);
   assert.equal(hosts.workstation.stackCalls().length, 0, 'the workstation never touches the stack');
-  // Both merged fleets show the workstation session in the laptop's stack.
+  // Both merged bearclaws show the workstation session in the laptop's stack.
   for (const name of ['laptop', 'workstation']) {
-    const fleet = (await json('GET', `${urls[name]}/api/fleet`)).body;
-    const ws = fleet.hosts.find((h) => h.name === 'workstation');
+    const bearclaw = (await json('GET', `${urls[name]}/api/bearclaw`)).body;
+    const ws = bearclaw.hosts.find((h) => h.name === 'workstation');
     const row = ws.sessions.find((s) => s.session_id === joined.session);
     assert.deepEqual(row.stack, { id: STACK_ID, label: 'Login redirect fix', host: 'laptop' }, `${name}'s view`);
-    const lp = fleet.hosts.find((h) => h.name === 'laptop');
+    const lp = bearclaw.hosts.find((h) => h.name === 'laptop');
     assert.equal(lp.stacks.find((s) => s.id === STACK_ID).members.some((m) => m.session === joined.session && m.host === 'workstation'), true);
   }
-  // The laptop's sync goes out with the merged fleet (so the workstation member is judged).
+  // The laptop's sync goes out with the merged bearclaw (so the workstation member is judged).
   await hosts.laptop.stacks.syncNow('test');
   const sync = hosts.laptop.calls.filter((c) => c.args?.[2] === 'sync').at(-1);
   assert.deepEqual(sync.args.slice(2, -1), ['sync', '--input', '-']);

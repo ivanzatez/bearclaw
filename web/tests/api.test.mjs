@@ -8,8 +8,8 @@ import path from 'node:path';
 
 import { createApi } from '../lib/api.mjs';
 import { createHttpServer } from '../lib/app.mjs';
-import { createFleet } from '../lib/fleet.mjs';
-import { createFleetCli } from '../lib/fleet-cli.mjs';
+import { createBearclaw } from '../lib/bearclaw.mjs';
+import { createBearclawCli } from '../lib/bearclaw-cli.mjs';
 import { normalizeConfig } from '../lib/config.mjs';
 
 function listen(server) {
@@ -18,7 +18,7 @@ function listen(server) {
 
 function fakeHost(self, sessions) {
   const calls = [];
-  const cli = createFleetCli({ run: async () => ({ stdout: JSON.stringify(sessions), stderr: '' }) });
+  const cli = createBearclawCli({ run: async () => ({ stdout: JSON.stringify(sessions), stderr: '' }) });
   const backend = {
     peek: async (s, lines) => (calls.push(['peek', s.session_id, lines]), `screen of ${s.name}`),
     send: async (s, text) => void calls.push(['send', s.session_id, text]),
@@ -69,11 +69,11 @@ function fakeHost(self, sessions) {
     calls.push(['prSeen', ref]);
     return { pr: ref, seenAt: 1000, applied: true };
   };
-  return { calls, cli, backend, transcripts, spawner, killer, autoNamer, fleet: createFleet({ cli, self }) };
+  return { calls, cli, backend, transcripts, spawner, killer, autoNamer, bearclaw: createBearclaw({ cli, self }) };
 }
 
 async function startPair(t) {
-  const uiDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-web-ui-'));
+  const uiDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-web-ui-'));
   fs.writeFileSync(path.join(uiDir, 'index.html'), '<p>custom ui</p>');
   t.after(() => fs.rmSync(uiDir, { recursive: true, force: true }));
 
@@ -134,7 +134,7 @@ test('health and settings', async (t) => {
 test('settings exposes web.models when configured', async () => {
   const host = fakeHost('solo', []);
   const config = normalizeConfig({ self: 'solo', web: { models: [{ id: 'claude-sonnet-5', label: 'Sonnet' }, 'claude-opus-5-5'] } }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, warmFleet: false });
+  const api = createApi({ config, ...host, warmBearclaw: false });
   const res = await api({ method: 'GET', headers: {} }, new URL('http://x/api/settings'));
   assert.deepEqual(res.body.models, [
     { id: 'claude-sonnet-5', label: 'Sonnet' },
@@ -142,14 +142,14 @@ test('settings exposes web.models when configured', async () => {
   ]);
 });
 
-test('/api/fleet merges self + peer; ?local=1 does not fetch peers', async (t) => {
+test('/api/bearclaw merges self + peer; ?local=1 does not fetch peers', async (t) => {
   const { urls } = await startPair(t);
-  const all = await get(`${urls.laptop}/api/fleet`);
+  const all = await get(`${urls.laptop}/api/bearclaw`);
   assert.equal(all.status, 200);
   assert.deepEqual(all.body.hosts.map((h) => h.name), ['laptop', 'workstation']);
   assert.equal(all.body.hosts[1].sessions[0].host, 'workstation');
   assert.equal(all.body.hosts[1].spawnDirs[0].label, 'Tmp', 'peer advertises its own spawnDirs');
-  const local = await get(`${urls.workstation}/api/fleet?local=1`);
+  const local = await get(`${urls.workstation}/api/bearclaw?local=1`);
   assert.deepEqual(local.body.hosts.map((h) => h.name), ['workstation']);
 });
 
@@ -203,7 +203,7 @@ test('errors: unknown host/session/route, bad input, wrong method', async (t) =>
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/send`, { text: '' })).status, 400);
   assert.equal((await post(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/keys`, { key: 'C-c' })).status, 400);
   assert.equal((await get(`${urls.laptop}/api/hosts/laptop/sessions/aaaaaaaa/send`)).status, 405);
-  assert.equal((await post(`${urls.laptop}/api/fleet`, {})).status, 405);
+  assert.equal((await post(`${urls.laptop}/api/bearclaw`, {})).status, 405);
 });
 
 test('static UI is served from the configured ui dir', async (t) => {
@@ -281,7 +281,7 @@ test('an unnamed spawn with a first prompt schedules a targeted naming pass (aut
   const mk = (enabled) => {
     const host = fakeHost('solo', []);
     const config = normalizeConfig({ self: 'solo', web: { autoName: { enabled } }, spawnDirs: [{ path: os.tmpdir() }] }, { env: {}, home: '/home/tester' });
-    return createApi({ config, ...host, spawnNamer, warmFleet: false });
+    return createApi({ config, ...host, spawnNamer, warmBearclaw: false });
   };
   const url = new URL('http://x/api/hosts/solo/spawn');
   const on = mk(true);
@@ -297,18 +297,18 @@ test('an unnamed spawn with a first prompt schedules a targeted naming pass (aut
 test('spawn keeps `claude -n <name>` when auto-naming is off', async () => {
   const host = fakeHost('solo', []);
   const config = normalizeConfig({ self: 'solo', web: { autoName: { enabled: false } }, spawnDirs: [{ path: os.tmpdir() }] }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, warmFleet: false });
+  const api = createApi({ config, ...host, warmBearclaw: false });
   const req = Object.assign(new (await import('node:stream')).PassThrough(), { method: 'POST', headers: {} });
   req.end('{}');
   await api(req, new URL('http://x/api/hosts/solo/spawn'));
   assert.equal(host.calls.at(-1)[1].nameGiven, true);
 });
 
-test('/api/fleet is served from the warm snapshot with snapshotAt', async (t) => {
+test('/api/bearclaw is served from the warm snapshot with snapshotAt', async (t) => {
   const { urls } = await startPair(t);
-  const first = await get(`${urls.laptop}/api/fleet`);
+  const first = await get(`${urls.laptop}/api/bearclaw`);
   assert.equal(typeof first.body.snapshotAt, 'number');
-  const again = await get(`${urls.laptop}/api/fleet`);
+  const again = await get(`${urls.laptop}/api/bearclaw`);
   assert.ok(again.body.snapshotAt >= first.body.snapshotAt);
   assert.deepEqual(again.body.hosts.map((h) => h.name), ['laptop', 'workstation']);
 });
@@ -360,7 +360,7 @@ test('rename is POST-only, validated, served locally or proxied once, and a held
   assert.equal((await post(`${base}/laptop/sessions/zzzzzzzzzz/rename`, { title: 'x' })).status, 404);
 });
 
-test('fleet CLI rename runs `fleet rename <id> <title> --json` and resolves a held report (exit 3)', async () => {
+test('bearclaw CLI rename runs `bearclaw rename <id> <title> --json` and resolves a held report (exit 3)', async () => {
   const calls = [];
   let mode = 'ok';
   const run = async (bin, args, opts) => {
@@ -371,7 +371,7 @@ test('fleet CLI rename runs `fleet rename <id> <title> --json` and resolves a he
     if (mode === 'fail') throw Object.assign(new Error('Error: no live session matches "x"'), { code: 1, stdout: '' });
     return { stdout: JSON.stringify({ ok: true, result: 'sent', title: 'T' }), stderr: '' };
   };
-  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
   assert.equal((await cli.rename({ target: 'abc', title: 'T' })).result, 'sent');
   assert.deepEqual(calls[0].args, ['rename', 'abc', 'T', '--json']);
   assert.equal(calls[0].opts.env.NO_COLOR, '1');
@@ -472,11 +472,11 @@ test('prs/seen marks a PR seen on the host it was fetched on', async (t) => {
 test('prs: a CLI failure is a 502 with its reason', async () => {
   const host = fakeHost('broken', []);
   const config = normalizeConfig({ self: 'broken' }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, warmFleet: false });
+  const api = createApi({ config, ...host, warmBearclaw: false });
   await assert.rejects(api({ method: 'GET', headers: {} }, new URL('http://x/api/hosts/broken/prs')), (e) => e.status === 502 && /gh auth login/.test(e.message));
 });
 
-test('fleet CLI prs runs `fleet --local prs --json [--refresh]` and surfaces the last error line', async () => {
+test('bearclaw CLI prs runs `bearclaw --local prs --json [--refresh]` and surfaces the last error line', async () => {
   const calls = [];
   let stderr = null;
   const run = async (bin, args) => {
@@ -484,17 +484,17 @@ test('fleet CLI prs runs `fleet --local prs --json [--refresh]` and surfaces the
     if (stderr) throw Object.assign(new Error('exit 1'), { code: 1, stderr });
     return { stdout: JSON.stringify({ prs: [], stale: false }), stderr: '' };
   };
-  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
   assert.deepEqual(await cli.prs(), { prs: [], stale: false });
   await cli.prs({ refresh: true });
   assert.deepEqual(calls, [['--local', 'prs', '--json'], ['--local', 'prs', '--json', '--refresh']]);
   stderr = 'warning: prs.orgs: 3 is not a name\nError: gh api graphql failed: HTTP 502\n';
-  await assert.rejects(cli.prs(), /^FleetCliError: gh api graphql failed: HTTP 502$/);
+  await assert.rejects(cli.prs(), /^BearclawCliError: gh api graphql failed: HTTP 502$/);
   stderr = "error: unrecognized subcommand 'prs'\n";
   await assert.rejects(cli.prs(), (e) => e.missing === true);
 });
 
-test('fleet CLI prCheckout runs `fleet --local pr checkout --json -- <ref>`', async () => {
+test('bearclaw CLI prCheckout runs `bearclaw --local pr checkout --json -- <ref>`', async () => {
   const calls = [];
   let stderr = null;
   const run = async (bin, args) => {
@@ -502,11 +502,11 @@ test('fleet CLI prCheckout runs `fleet --local pr checkout --json -- <ref>`', as
     if (stderr) throw Object.assign(new Error('exit 1'), { code: 1, stderr });
     return { stdout: JSON.stringify({ path: '/w', created: true }), stderr: '' };
   };
-  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
   assert.deepEqual(await cli.prCheckout('acme/app#3'), { path: '/w', created: true });
   assert.deepEqual(calls, [['--local', 'pr', 'checkout', '--json', '--', 'acme/app#3']]);
   stderr = 'Error: git fetch --quiet origin feat: fatal: could not read from remote\n';
-  await assert.rejects(cli.prCheckout('acme/app#3'), /^FleetCliError: git fetch --quiet origin feat: fatal/);
+  await assert.rejects(cli.prCheckout('acme/app#3'), /^BearclawCliError: git fetch --quiet origin feat: fatal/);
   stderr = null;
   await cli.prSeen('acme/app#3');
   assert.deepEqual(calls.at(-1), ['--local', 'pr', 'seen', '--json', '--', 'acme/app#3']);
@@ -530,11 +530,11 @@ test('harnesses: per host, cached, Claude models from the config, proxied to pee
 test('usage: a CLI failure is a 502 with its reason', async () => {
   const host = fakeHost('broken', []);
   const config = normalizeConfig({ self: 'broken' }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, warmFleet: false });
+  const api = createApi({ config, ...host, warmBearclaw: false });
   await assert.rejects(api({ method: 'GET', headers: {} }, new URL('http://x/api/hosts/broken/usage')), (e) => e.status === 502 && /no Claude Code login/.test(e.message));
 });
 
-test('fleet CLI usage runs `fleet --local usage --json [--refresh]` and surfaces its error', async () => {
+test('bearclaw CLI usage runs `bearclaw --local usage --json [--refresh]` and surfaces its error', async () => {
   const calls = [];
   let fail = false;
   const run = async (bin, args) => {
@@ -542,12 +542,12 @@ test('fleet CLI usage runs `fleet --local usage --json [--refresh]` and surfaces
     if (fail) throw Object.assign(new Error('exit 1'), { code: 1, stderr: 'Error: no Claude Code login found (run `claude` and /login)\n' });
     return { stdout: JSON.stringify({ limits: [], stale: false }), stderr: '' };
   };
-  const cli = createFleetCli({ run, bin: '/x/fleet' });
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
   assert.deepEqual(await cli.usage(), { limits: [], stale: false });
   await cli.usage({ refresh: true });
   assert.deepEqual(calls, [['--local', 'usage', '--json'], ['--local', 'usage', '--json', '--refresh']]);
   fail = true;
-  await assert.rejects(cli.usage(), /^FleetCliError: no Claude Code login found/);
+  await assert.rejects(cli.usage(), /^BearclawCliError: no Claude Code login found/);
 });
 
 test('answer types the keys for the pending question, only when it is safe to', async (t) => {
@@ -560,7 +560,7 @@ test('answer types the keys for the pending question, only when it is safe to', 
   host.backend.peek = async () => screen;
   host.backend.type = async (s, text) => void host.calls.push(['type', s.session_id, text]);
   const config = normalizeConfig({ self: 'solo' }, { env: {}, home: '/home/tester' });
-  const api = createApi({ config, ...host, warmFleet: false, sleep: async () => {} });
+  const api = createApi({ config, ...host, warmBearclaw: false, sleep: async () => {} });
   const server = createHttpServer({ handleApi: api, uiDir: os.tmpdir() });
   const base = await listen(server);
   t.after(() => server.close());

@@ -7,7 +7,7 @@ import { StackUi } from '@/components/stack/StackUi'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { DormantProvider } from '@/providers/DormantProvider'
-import { FleetProvider } from '@/providers/FleetProvider'
+import { BearclawProvider } from '@/providers/BearclawProvider'
 import { PrefsProvider } from '@/providers/PrefsProvider'
 import { PrsProvider } from '@/providers/PrsProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
@@ -28,7 +28,7 @@ import { UsageScreen } from '@/screens/UsageScreen'
 
 /**
  * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
- * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the fleet by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos) and `#/notes[/<host>[/<path>]]` (the notes explorer).
+ * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the bearclaw by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
  */
@@ -43,7 +43,7 @@ export default function App() {
       <PrefsProvider>
       <SettingsProvider>
       <SpeechProvider>
-        <FleetProvider>
+        <BearclawProvider>
         <DormantProvider>
         <PrsProvider>
           <TooltipProvider>
@@ -95,7 +95,7 @@ export default function App() {
           </TooltipProvider>
         </PrsProvider>
         </DormantProvider>
-        </FleetProvider>
+        </BearclawProvider>
       </SpeechProvider>
       </SettingsProvider>
       </PrefsProvider>

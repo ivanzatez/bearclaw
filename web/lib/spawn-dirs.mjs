@@ -2,9 +2,9 @@
 // directories). Each host validates and stores its own config; the UI writes the same
 // list to every host (the shared-list model: one entry per label, a path per host).
 //
-// Writes go through the CLI (`fleet --local config set spawnDirs <json>`, lib/fleet-cli.mjs):
+// Writes go through the CLI (`bearclaw --local config set spawnDirs <json>`, lib/bearclaw-cli.mjs):
 // the CLI owns the config file (atomic tmp + rename, unknown keys kept). After a write the
-// running server's `config.spawnDirs` is replaced in place, so /api/fleet and the spawn
+// running server's `config.spawnDirs` is replaced in place, so /api/bearclaw and the spawn
 // allow-list use the new list at once — no restart.
 //
 // Editing this list is as powerful as spawning (it widens what spawn accepts); like
@@ -136,8 +136,8 @@ export async function validateSpawnDirs(list, { self, home = os.homedir(), stat 
 
 /**
  * @param config      the server's normalized config — `config.spawnDirs` is replaced in place after a save
- * @param configFile  the config path the CLI writes (FLEET_CONFIG)
- * @param cli         lib/fleet-cli.mjs instance (`configSet`)
+ * @param configFile  the config path the CLI writes (BEARCLAW_CONFIG)
+ * @param cli         lib/bearclaw-cli.mjs instance (`configSet`)
  */
 export function createSpawnDirsEditor({ config, configFile, cli, home = os.homedir(), fsImpl = fs, stat = statDir }) {
   let queue = Promise.resolve(); // one write at a time (the CLI's tmp file is fixed)
@@ -148,13 +148,13 @@ export function createSpawnDirsEditor({ config, configFile, cli, home = os.homed
       text = fsImpl.readFileSync(configFile, 'utf8');
     } catch (err) {
       if (err?.code === 'ENOENT') return {};
-      throw Object.assign(new Error(`cannot read fleet config: ${err.message}`), { status: 500 });
+      throw Object.assign(new Error(`cannot read bearclaw config: ${err.message}`), { status: 500 });
     }
     try {
       const raw = JSON.parse(text);
       return isObject(raw) ? raw : {};
     } catch (err) {
-      throw Object.assign(new Error(`fleet config is not valid JSON: ${err.message}`), { status: 500 });
+      throw Object.assign(new Error(`bearclaw config is not valid JSON: ${err.message}`), { status: 500 });
     }
   }
 

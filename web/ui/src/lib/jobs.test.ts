@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import type { FleetResponse, Job, JobRunSession } from '@/api/types'
+import type { BearclawResponse, Job, JobRunSession } from '@/api/types'
 import { flattenJobs, isJobsLocation, keepLabel, liveSession, liveSummary, outcomeTone, promptLabel, runTree, whenLabel } from './jobs'
 
 const job = (over: Partial<Job>): Job => ({
@@ -73,15 +73,15 @@ test('runTree: children under their parent, siblings in start order, unknown par
 })
 
 test('liveSession: by host + tmux session', () => {
-  const fleet: FleetResponse = {
+  const bearclaw: BearclawResponse = {
     self: 'laptop',
     hosts: [
       { name: 'laptop', ok: true, sessions: [{ host: 'laptop', session_id: '1', tmux_session: 'triage-0101-0700' }] },
       { name: 'workstation', ok: true, sessions: [{ host: 'workstation', session_id: '2', tmux_session: 'triage-0101-0700' }] },
     ],
   }
-  expect(liveSession(fleet, 'workstation', 'triage-0101-0700')?.session_id).toBe('2')
-  expect(liveSession(fleet, 'laptop', 'gone')).toBeNull()
+  expect(liveSession(bearclaw, 'workstation', 'triage-0101-0700')?.session_id).toBe('2')
+  expect(liveSession(bearclaw, 'laptop', 'gone')).toBeNull()
   expect(liveSession(null, 'laptop', 'x')).toBeNull()
 })
 

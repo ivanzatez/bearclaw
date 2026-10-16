@@ -17,8 +17,8 @@ import {
 } from '../lib/util.mjs';
 import { resolveStaticPath, readJsonBody, contentTypeFor, HttpError } from '../lib/http.mjs';
 import { createBackend, BackendError, createScriptProvider, ITERM_SCRIPT, TYPE_CHUNK, typeChunks } from '../lib/backends.mjs';
-import { createFleet, trimTitle, TITLE_MAX } from '../lib/fleet.mjs';
-import { createFleetCli } from '../lib/fleet-cli.mjs';
+import { createBearclaw, trimTitle, TITLE_MAX } from '../lib/bearclaw.mjs';
+import { createBearclawCli } from '../lib/bearclaw-cli.mjs';
 import { ensurePath, ensureUtf8Locale } from '../lib/config.mjs';
 
 // ------------------------------------------------------------------ tailLines
@@ -164,7 +164,7 @@ test('validateKey allows only Enter and Escape', () => {
 
 // ------------------------------------------------------------------ static paths
 
-const PUB = '/srv/fleet-web/public';
+const PUB = '/srv/bearclaw-web/public';
 
 test('resolveStaticPath maps / to index.html', () => {
   assert.deepEqual(resolveStaticPath(PUB, '/'), { ok: true, file: path.join(PUB, 'index.html') });
@@ -357,7 +357,7 @@ test('unknown backend and missing handle are 409', async () => {
 });
 
 test('createScriptProvider writes the AppleScript once and reuses it', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-web-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-web-test-'));
   try {
     const provider = createScriptProvider({ tmpdir: dir });
     const a = provider();
@@ -370,33 +370,33 @@ test('createScriptProvider writes the AppleScript once and reuses it', () => {
   }
 });
 
-// ------------------------------------------------------------------ fleet discovery
+// ------------------------------------------------------------------ bearclaw discovery
 
 const FAKE_LIST = JSON.stringify([
   { session_id: 'a', status: 'idle', updated_at: 2 },
   { session_id: 'b', status: 'waiting', updated_at: 1 },
 ]);
 
-test('fleet sorts, tags host and caches for the TTL', async () => {
+test('bearclaw sorts, tags host and caches for the TTL', async () => {
   let clock = 1000;
   let calls = 0;
   const run = async () => {
     calls += 1;
     return { stdout: FAKE_LIST, stderr: '' };
   };
-  const fleet = createFleet({ cli: createFleetCli({ run }), self: 'laptop', ttlMs: 2000, now: () => clock });
-  const first = await fleet.localHost();
+  const bearclaw = createBearclaw({ cli: createBearclawCli({ run }), self: 'laptop', ttlMs: 2000, now: () => clock });
+  const first = await bearclaw.localHost();
   assert.equal(first.ok, true);
   assert.equal(first.name, 'laptop');
   assert.deepEqual(first.sessions.map((s) => s.session_id), ['b', 'a']);
   assert.ok(first.sessions.every((s) => s.host === 'laptop'));
 
   clock += 500;
-  await fleet.localHost();
+  await bearclaw.localHost();
   assert.equal(calls, 1, 'served from cache');
 
   clock += 2500;
-  await fleet.localHost();
+  await bearclaw.localHost();
   assert.equal(calls, 2, 'cache expired');
 });
 
@@ -409,62 +409,62 @@ test('trimTitle caps long first prompts for transport', () => {
   assert.ok(long.endsWith('…'));
 });
 
-test('fleet trims session titles', async () => {
+test('bearclaw trims session titles', async () => {
   const run = async () => ({ stdout: JSON.stringify([{ session_id: 'a', status: 'idle', title: 'y'.repeat(5000) }]), stderr: '' });
-  const host = await createFleet({ cli: createFleetCli({ run }), self: 'laptop' }).localHost();
+  const host = await createBearclaw({ cli: createBearclawCli({ run }), self: 'laptop' }).localHost();
   assert.equal(host.sessions[0].title.length, TITLE_MAX + 1);
 });
 
-test('fleet passes context usage through untouched', async () => {
+test('bearclaw passes context usage through untouched', async () => {
   const context = { used: 124000, window: 200000, pct: 62, model: 'claude-x' };
   const rows = [
     { session_id: 'a', status: 'idle', context },
     { session_id: 'b', status: 'idle', context: null },
   ];
   const run = async () => ({ stdout: JSON.stringify(rows), stderr: '' });
-  const host = await createFleet({ cli: createFleetCli({ run }), self: 'laptop' }).localHost();
+  const host = await createBearclaw({ cli: createBearclawCli({ run }), self: 'laptop' }).localHost();
   const byId = Object.fromEntries(host.sessions.map((s) => [s.session_id, s]));
   assert.deepEqual(byId.a.context, context);
   assert.equal(byId.b.context, null);
 });
 
-test('fleet CLI is invoked as `<bin> list --json`', async () => {
+test('bearclaw CLI is invoked as `<bin> list --json`', async () => {
   const calls = [];
-  const cli = createFleetCli({
-    bin: '/opt/fleet/bin/fleet',
+  const cli = createBearclawCli({
+    bin: '/opt/bearclaw/bin/bearclaw',
     run: async (file, args) => {
       calls.push([file, ...args]);
       return { stdout: '[]', stderr: '' };
     },
   });
   assert.deepEqual(await cli.list(), []);
-  assert.deepEqual(calls, [['/opt/fleet/bin/fleet', 'list', '--json']]);
+  assert.deepEqual(calls, [['/opt/bearclaw/bin/bearclaw', 'list', '--json']]);
 });
 
-test('fleet de-duplicates concurrent discovery', async () => {
+test('bearclaw de-duplicates concurrent discovery', async () => {
   let calls = 0;
   const run = async () => {
     calls += 1;
     await new Promise((r) => setTimeout(r, 10));
     return { stdout: FAKE_LIST, stderr: '' };
   };
-  const fleet = createFleet({ cli: createFleetCli({ run }), self: 'laptop' });
-  await Promise.all([fleet.localHost(), fleet.localHost(), fleet.localHost()]);
+  const bearclaw = createBearclaw({ cli: createBearclawCli({ run }), self: 'laptop' });
+  await Promise.all([bearclaw.localHost(), bearclaw.localHost(), bearclaw.localHost()]);
   assert.equal(calls, 1);
 });
 
-test('fleet never throws: garbled output, non-array and child errors', async () => {
-  const garbled = createFleet({ cli: createFleetCli({ run: async () => ({ stdout: 'not json', stderr: '' }) }), self: 'l' });
+test('bearclaw never throws: garbled output, non-array and child errors', async () => {
+  const garbled = createBearclaw({ cli: createBearclawCli({ run: async () => ({ stdout: 'not json', stderr: '' }) }), self: 'l' });
   const g = await garbled.localHost();
   assert.equal(g.ok, false);
   assert.match(g.error, /non-JSON/);
 
-  const notArray = createFleet({ cli: createFleetCli({ run: async () => ({ stdout: '{"a":1}', stderr: '' }) }), self: 'l' });
+  const notArray = createBearclaw({ cli: createBearclawCli({ run: async () => ({ stdout: '{"a":1}', stderr: '' }) }), self: 'l' });
   assert.equal((await notArray.localHost()).ok, false);
 
-  const boom = createFleet({
-    cli: createFleetCli({
-      bin: '/nope/fleet',
+  const boom = createBearclaw({
+    cli: createBearclawCli({
+      bin: '/nope/bearclaw',
       run: async () => {
         throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
       },
@@ -473,11 +473,11 @@ test('fleet never throws: garbled output, non-array and child errors', async () 
   });
   const b = await boom.localHost();
   assert.equal(b.ok, false);
-  assert.match(b.error, /fleet binary not found \(\/nope\/fleet\)/);
+  assert.match(b.error, /bearclaw binary not found \(\/nope\/bearclaw\)/);
   assert.deepEqual(b.sessions, []);
 
-  const timedOut = createFleet({
-    cli: createFleetCli({
+  const timedOut = createBearclaw({
+    cli: createBearclawCli({
       run: async () => {
         throw Object.assign(new Error('killed'), { killed: true });
       },
@@ -486,7 +486,7 @@ test('fleet never throws: garbled output, non-array and child errors', async () 
   });
   assert.match((await timedOut.localHost()).error, /timed out/);
 
-  const empty = createFleet({ cli: createFleetCli({ run: async () => ({ stdout: '   ', stderr: '' }) }), self: 'l' });
+  const empty = createBearclaw({ cli: createBearclawCli({ run: async () => ({ stdout: '   ', stderr: '' }) }), self: 'l' });
   const e = await empty.localHost();
   assert.equal(e.ok, true);
   assert.deepEqual(e.sessions, []);

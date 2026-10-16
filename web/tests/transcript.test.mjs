@@ -10,7 +10,7 @@ const user = (content, extra = {}) => line({ type: 'user', timestamp: '2026-09-1
 const asst = (content, { id = 'msg_1', stop = 'end_turn' } = {}) =>
   line({ type: 'assistant', timestamp: '2026-09-18T18:01:57.000Z', message: { id, role: 'assistant', content, stop_reason: stop } });
 
-test('encodeCwd mirrors the fleet CLI (slashes and dots become dashes)', () => {
+test('encodeCwd mirrors the bearclaw CLI (slashes and dots become dashes)', () => {
   assert.equal(encodeCwd('/home/user/Code/project'), '-home-user-Code-project');
   assert.equal(encodeCwd('/tmp/a.b/c'), '-tmp-a-b-c');
 });
@@ -160,7 +160,7 @@ test('parsePiTranscript: user and assistant text; a tool-call stop is not final'
 });
 
 test('the reader reads a Codex / pi session from the transcript path discovery gave it', async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'fleet-tr-'));
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bearclaw-tr-'));
   const file = path.join(dir, 's.jsonl');
   writeFileSync(file, JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'yo' }] } }) + '\n');
   const r = createTranscriptReader({ home: dir });

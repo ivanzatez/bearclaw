@@ -1,11 +1,11 @@
 // Session stacks, the web side (docs/architecture.md → Session stacks). A stack is N Claude
-// sessions sharing one markdown file, the StackBrief; the `fleet` CLI owns it entirely
-// (`fleet --local stack … --json`, lib/fleet-cli.mjs). The server never parses the markdown: it
+// sessions sharing one markdown file, the StackBrief; the `bearclaw` CLI owns it entirely
+// (`bearclaw --local stack … --json`, lib/bearclaw-cli.mjs). The server never parses the markdown: it
 // passes the CLI's JSON (StackView) through, adds `editorUrl` on the serving side, spawns
 // siblings with its own spawner (or a peer's, for a sibling on another host) and, in the
 // background, adds the new session to the stack once it has registered and keeps membership in
-// sync (`stack sync --input -` with the merged fleet, so members on other hosts are judged too).
-// This host's stacks go out in its `/api/fleet?local=1` entry (`stacks`, compact) and every
+// sync (`stack sync --input -` with the merged bearclaw, so members on other hosts are judged too).
+// This host's stacks go out in its `/api/bearclaw?local=1` entry (`stacks`, compact) and every
 // server stamps `stack` on the rows of members whose stack is homed elsewhere (`stampForeign`).
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -36,12 +36,12 @@ export const STACK_SYNC_INITIAL_DELAY_MS = 30 * 1000;
  */
 const STACK_MISSING_RE = /\b(no stack|unknown stack|no such stack|stack not found|not found)\b|\bstack st-[0-9a-f]{8} is gone\b/i;
 
-/** A FleetCliError from a `fleet stack` call → the HttpError the API answers with. */
-export function stackHttpError(err, what = 'fleet stack') {
+/** A BearclawCliError from a `bearclaw stack` call → the HttpError the API answers with. */
+export function stackHttpError(err, what = 'bearclaw stack') {
   if (err instanceof HttpError) return err;
   const msg = String(err?.message ?? err);
   if (err?.timedOut) return new HttpError(`${what} timed out: ${msg}`, 504);
-  if (err?.missing) return new HttpError('this host\'s fleet CLI has no `stack` command — update fleet there', 501);
+  if (err?.missing) return new HttpError('this host\'s bearclaw CLI has no `stack` command — update bearclaw there', 501);
   if (STACK_MISSING_RE.test(msg)) return new HttpError(msg, 404);
   if (err?.exitCode === 2 || err?.exitCode === 3) return new HttpError(msg, 409); // ambiguous / nothing to act on
   if (err?.exitCode === 1) return new HttpError(msg, 400); // usage / refusal
@@ -116,7 +116,7 @@ export async function resolveStackSpawnDir({ base, requested = null, roots = [],
   }
 }
 
-/** A StackView → the compact entry this host advertises in `/api/fleet` (`stacks[]`). */
+/** A StackView → the compact entry this host advertises in `/api/bearclaw` (`stacks[]`). */
 export function compactStack(view) {
   if (!view || typeof view !== 'object' || !STACK_ID_RE.test(String(view.id))) return null;
   return {
@@ -158,15 +158,15 @@ export function stampForeign(hosts) {
 
 /**
  * @param deps
- *   cli           lib/fleet-cli.mjs instance (stackList/Show/Set/Remove/Ensure/Add/Sync)
- *   listSessions  () => Promise<rows> — this host's fresh `fleet list --json` rows
+ *   cli           lib/bearclaw-cli.mjs instance (stackList/Show/Set/Remove/Ensure/Add/Sync)
+ *   listSessions  () => Promise<rows> — this host's fresh `bearclaw list --json` rows
  *   gateSessions  () => Promise<rows | null> — the current list for the sync gate (a cached one
- *                 is fine: server.mjs passes fleet.localHost(), 2 s TTL); default listSessions
+ *                 is fine: server.mjs passes bearclaw.localHost(), 2 s TTL); default listSessions
  *   self          this host's name (members without a host, and the join's default)
- *   syncEnabled   run the background sync (web.stacks; FLEET_WEB_STACKS=0 turns it off)
+ *   syncEnabled   run the background sync (web.stacks; BEARCLAW_WEB_STACKS=0 turns it off)
  *   syncIntervalMs, initialDelayMs, joinDelaysMs, sleep, log, now
- * `attach({ fleetBody, peerSessions })` (server.mjs, once the API exists): the merged
- * `/api/fleet` body for the sync, and a peer's fresh rows for a join on another host.
+ * `attach({ bearclawBody, peerSessions })` (server.mjs, once the API exists): the merged
+ * `/api/bearclaw` body for the sync, and a peer's fresh rows for a join on another host.
  */
 export function createStacks({
   cli,
@@ -184,7 +184,7 @@ export function createStacks({
   if (!cli || typeof cli.stackSync !== 'function') throw new TypeError('cli.stackSync must be a function');
   if (typeof listSessions !== 'function') throw new TypeError('listSessions must be a function');
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms).unref?.()));
-  let fleetBody = null; // () => Promise<{ hosts }> — the merged fleet (attach)
+  let bearclawBody = null; // () => Promise<{ hosts }> — the merged bearclaw (attach)
   let peerSessions = null; // (host) => Promise<rows | null> (attach)
 
   const call = async (what, fn) => {
@@ -223,7 +223,7 @@ export function createStacks({
   async function doSync(reason) {
     const at = now();
     try {
-      const input = fleetBody ? await fleetBody().catch(() => null) : null;
+      const input = bearclawBody ? await bearclawBody().catch(() => null) : null;
       const report = rememberAll(await cli.stackSync(input && Array.isArray(input.hosts) ? { input } : {}));
       const changed = Array.isArray(report?.changed) ? report.changed : [];
       lastSync = { at, ms: now() - at, reason, ok: true, changed, merged: Boolean(input) };
@@ -236,7 +236,7 @@ export function createStacks({
     }
   }
 
-  /** `fleet --local stack sync --json` → `{ host, changed, stacks }`; throws FleetCliError. */
+  /** `bearclaw --local stack sync --json` → `{ host, changed, stacks }`; throws BearclawCliError. */
   function sync(reason = 'manual') {
     if (!inFlight) {
       inFlight = doSync(reason).finally(() => {
@@ -287,7 +287,7 @@ export function createStacks({
 
   /**
    * The new session's row: this host's fresh list, or — a sibling started on `host` — that
-   * peer's (`peerSessions`, its `/api/fleet?local=1`). `null` = could not list this try.
+   * peer's (`peerSessions`, its `/api/bearclaw?local=1`). `null` = could not list this try.
    */
   async function rowsOn(host) {
     if (host === self) return listSessions().catch(() => null);
@@ -297,7 +297,7 @@ export function createStacks({
 
   async function runJoin(tmuxSession, stackId, host) {
     const where = host === self ? '' : ` on ${host}`;
-    const hint = host === self ? `fleet stack add ${stackId} <session>` : `fleet stack add ${stackId} <session> --on ${host}`;
+    const hint = host === self ? `bearclaw stack add ${stackId} <session>` : `bearclaw stack add ${stackId} <session> --on ${host}`;
     let tries = 0;
     for (const delay of joinDelaysMs) {
       await wait(delay);
@@ -342,8 +342,8 @@ export function createStacks({
   }
 
   return {
-    list: () => call('fleet stack list', async () => rememberAll(await cli.stackList())),
-    show: (id) => call('fleet stack show', async () => remember(await cli.stackShow(id))),
+    list: () => call('bearclaw stack list', async () => rememberAll(await cli.stackList())),
+    show: (id) => call('bearclaw stack show', async () => remember(await cli.stackShow(id))),
     /** A human edit. Conflict (CLI exit 3) → HttpError 409 carrying `body: { error, updated }`. */
     async set(id, markdown, expectUpdated = null) {
       try {
@@ -355,27 +355,27 @@ export function createStacks({
           e.body = { ...report, error: e.message, updated: report.updated ?? null };
           throw e;
         }
-        throw stackHttpError(err, 'fleet stack set');
+        throw stackHttpError(err, 'bearclaw stack set');
       }
     },
     remove: (id) =>
-      call('fleet stack rm', async () => {
+      call('bearclaw stack rm', async () => {
         const r = await cli.stackRemove(id);
         known.delete(id);
         return r;
       }),
-    rename: (id, label) => call('fleet stack rename', async () => remember(await cli.stackRename(id, label))),
-    ensure: (sessionId, opts) => call('fleet stack ensure', async () => rememberEnsured(await cli.stackEnsure(sessionId, opts))),
+    rename: (id, label) => call('bearclaw stack rename', async () => remember(await cli.stackRename(id, label))),
+    ensure: (sessionId, opts) => call('bearclaw stack ensure', async () => rememberEnsured(await cli.stackEnsure(sessionId, opts))),
     /** POST …/stacks/sync: like `sync`, errors mapped to HttpError. */
-    syncNow: (reason = 'manual') => call('fleet stack sync', () => sync(reason)),
+    syncNow: (reason = 'manual') => call('bearclaw stack sync', () => sync(reason)),
     sync,
     tick,
     join,
-    /** This host's stacks, compact (`/api/fleet` → `hosts[].stacks`): what the last calls showed. */
+    /** This host's stacks, compact (`/api/bearclaw` → `hosts[].stacks`): what the last calls showed. */
     compact: () => [...known.values()],
-    /** Wire the merged fleet (sync) and a peer's rows (join on another host); either may be absent. */
-    attach({ fleetBody: fb = null, peerSessions: ps = null } = {}) {
-      fleetBody = typeof fb === 'function' ? fb : null;
+    /** Wire the merged bearclaw (sync) and a peer's rows (join on another host); either may be absent. */
+    attach({ bearclawBody: fb = null, peerSessions: ps = null } = {}) {
+      bearclawBody = typeof fb === 'function' ? fb : null;
       peerSessions = typeof ps === 'function' ? ps : null;
     },
     start() {

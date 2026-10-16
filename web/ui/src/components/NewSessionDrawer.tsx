@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAttach, useFileDrop } from '@/hooks/useAttach'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { useHarnesses } from '@/hooks/useHarnesses'
 import { useSettings } from '@/hooks/useSettings'
 import { useVoice } from '@/hooks/useVoice'
@@ -31,14 +31,14 @@ import { stackErrorMessage, stacksMissing } from '@/lib/stacks'
 import { cn } from '@/lib/utils'
 import { appendTranscript, formatElapsed } from '@/lib/voice'
 
-const HOST_KEY = 'fleet.spawnHost'
-const dirKey = (host: string) => `fleet.spawnDirLabel.${host}`
-const HARNESS_KEY = 'fleet.spawnHarness'
+const HOST_KEY = 'bearclaw.spawnHost'
+const dirKey = (host: string) => `bearclaw.spawnDirLabel.${host}`
+const HARNESS_KEY = 'bearclaw.spawnHarness'
 // Past this many models a harness's picker is a dropdown, not chips (pi lists dozens).
 const MODEL_CHIPS_MAX = 8
 // The unsent first prompt of a plain New session (not a prefilled "continue"), so closing the form,
 // a reload, a crash or a failed spawn never loses it; cleared once the started session registers. Stale after a week.
-const DRAFT_KEY = 'fleet.spawnDraft'
+const DRAFT_KEY = 'bearclaw.spawnDraft'
 const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 function loadDraft(): string {
@@ -108,7 +108,7 @@ const sameFolderName = (a: string, b: string) => {
 
 /**
  * `+` in the list header: host, directory (that host's spawnDirs), model and an optional first
- * prompt → POST spawn, then watch the fleet for the new session and open it. No name field:
+ * prompt → POST spawn, then watch the bearclaw for the new session and open it. No name field:
  * the server's auto-namer names it (tmux `fw-hhmmss` when auto-naming is off).
  */
 export function NewSessionDrawer({ open, onOpenChange, onOpenSession, prefill, sibling }: NewSessionDrawerProps) {
@@ -154,8 +154,8 @@ function NewSessionForm({
   const Header = dialog ? DialogHeader : DrawerHeader
   const Title = dialog ? DialogTitle : DrawerTitle
   const Description = dialog ? DialogDescription : DrawerDescription
-  const { fleet, applyFleet } = useFleet()
-  const hosts = spawnTargets(fleet)
+  const { bearclaw, applyBearclaw } = useBearclaw()
+  const hosts = spawnTargets(bearclaw)
 
   const [host, setHost] = useState(() => {
     // A sibling starts where the user is looking (the source session's host); the stack's home may differ.
@@ -277,7 +277,7 @@ function NewSessionForm({
       watchForSpawned(
         { host: spawnHost, name, tmuxSession: res.spawn?.tmuxSession ?? name },
         {
-          onFleet: applyFleet,
+          onBearclaw: applyBearclaw,
           onFound: (s) => {
             toast.success(`${name} is up`, { id, description: undefined })
             onOpenSession(sessionHref(s))
@@ -312,7 +312,7 @@ function NewSessionForm({
       watchForSpawned(
         { host, name: res.name, tmuxSession: res.tmuxSession },
         {
-          onFleet: applyFleet,
+          onBearclaw: applyBearclaw,
           onFound: (s) => {
             clearDraftIf(sent)
             toast.success(`${res.name} is up`, { id, description: undefined })
@@ -557,7 +557,7 @@ function NewSessionForm({
           {sibling
             ? sibling.creates
               ? `This starts a new stack around this session (one Sonnet call), then a sibling session${siblingSameHost ? ' in the same directory' : ` on ${host}`} that reads the shared StackBrief first.`
-              : `A new session in the stack ${sibling.label ? `“${sibling.label}”` : ''}${siblingSameHost ? ', in the same directory' : ` on ${host}`}. It reads the shared StackBrief first${siblingSameHost ? '' : ` (through fleet, from ${sibling.host})`}.`
+              : `A new session in the stack ${sibling.label ? `“${sibling.label}”` : ''}${siblingSameHost ? ', in the same directory' : ` on ${host}`}. It reads the shared StackBrief first${siblingSameHost ? '' : ` (through bearclaw, from ${sibling.host})`}.`
             : `Starts ${who} in a new tmux session. A first-run folder trust prompt is accepted for you.`}
         </Description>
       </Header>

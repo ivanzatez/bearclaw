@@ -5,12 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { createSpawner, isWithin, launchCommand, paneTail, resolveAllowedDir, sanitizeName, shq, shqTyped, validateSpawnRequest } from '../lib/spawn.mjs';
 
-test('shq quotes like the fleet CLI', () => {
+test('shq quotes like the bearclaw CLI', () => {
   assert.equal(shq('a b'), "'a b'");
   assert.equal(shq("it's"), "'it'\\''s'");
 });
 
-test('sanitizeName mirrors fleet tmux new', () => {
+test('sanitizeName mirrors bearclaw tmux new', () => {
   assert.equal(sanitizeName('  Fix Login Bug! '), 'fix-login-bug');
   assert.equal(sanitizeName('---'), '');
   assert.equal(sanitizeName('x'.repeat(60)).length, 40);
@@ -127,7 +127,7 @@ test('spawner launches codex with its configured command and accepts its trust p
 });
 
 test('spawner passes a prompt too long to type via a file', async (t) => {
-  const promptDir = mkdtempSync(path.join(os.tmpdir(), 'fleet-prompts-'));
+  const promptDir = mkdtempSync(path.join(os.tmpdir(), 'bearclaw-prompts-'));
   t.after(() => rmSync(promptDir, { recursive: true, force: true }));
   const calls = [];
   const run = async (bin, args) => {
@@ -232,7 +232,7 @@ test('isWithin is path-segment aware', () => {
 });
 
 test('resolveAllowedDir allows roots and subdirs, rejects .. and symlink escapes', async (t) => {
-  const base = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'fleet-spawn-')));
+  const base = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'bearclaw-spawn-')));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const root = path.join(base, 'root');
   const outside = path.join(base, 'outside');

@@ -1,24 +1,24 @@
-# fleet web UI (React)
+# bearclaw web UI (React)
 
-The mobile-first PWA (with a keyboard-first desktop layout from 1024px up) for the fleet web server, built with Vite + React 19 + TypeScript +
+The mobile-first PWA (with a keyboard-first desktop layout from 1024px up) for the bearclaw web server, built with Vite + React 19 + TypeScript +
 Tailwind CSS v4 + [shadcn/ui](https://ui.shadcn.com) (radix, "nova" style) + lucide-react.
 It talks only to the server's HTTP API ([../ARCHITECTURE.md](../ARCHITECTURE.md) → "HTTP API").
 
 The server serves `dist/` (until it is built, `/` is a "not built" placeholder). `dist/` is gitignored and is
-what `fleet install --host` copies — sources and `node_modules` never leave this machine.
+what `bearclaw install --host` copies — sources and `node_modules` never leave this machine.
 
 ## Build
 
 ```sh
-fleet web build                                  # npm ci (if needed) + npm run build
+bearclaw web build                                  # npm ci (if needed) + npm run build
 npm --prefix web/ui ci && npm --prefix web/ui run build   # the same, by hand
 ```
 
 ## Develop
 
 ```sh
-fleet web serve --port 7796 --bind 127.0.0.1     # an API to talk to (any running server works)
-FLEET_WEB_URL=http://127.0.0.1:7796 npm run dev  # Vite on :5173, /api proxied (default target :7777)
+bearclaw web serve --port 7796 --bind 127.0.0.1     # an API to talk to (any running server works)
+BEARCLAW_WEB_URL=http://127.0.0.1:7796 npm run dev  # Vite on :5173, /api proxied (default target :7777)
 ```
 
 Checks (all must be clean): `npm run typecheck`, `npm run lint` (oxlint), `npm test` (vitest),
@@ -28,9 +28,9 @@ Checks (all must be clean): `npm run typecheck`, `npm run lint` (oxlint), `npm t
 
 ```
 src/
-  api/types.ts        API types (Session, Host, FleetResponse, Message, …) — mirror ARCHITECTURE.md
-  api/client.ts       typed fetch client: api.fleet(), api.messages(), api.send(), … + ApiError, sessionErrorMessage
-  api/spawnWatch.ts   after a spawn: poll the fleet until the new session registers
+  api/types.ts        API types (Session, Host, BearclawResponse, Message, …) — mirror ARCHITECTURE.md
+  api/client.ts       typed fetch client: api.bearclaw(), api.messages(), api.send(), … + ApiError, sessionErrorMessage
+  api/spawnWatch.ts   after a spawn: poll the bearclaw until the new session registers
   lib/format.ts       pure display helpers: relTime, clockTime, shortCwd, sessionSubtitle (first prompt), hostColorSlot
   lib/title.ts        the one session title: sessionTitle() (display_title + optimistic override), validateTitle(),
                       titleChanged(), renameFailure() / tmuxNote() toast copy, echoesTitle()
@@ -49,7 +49,7 @@ src/
                       stacksMissing() (server predates stacks), stacksKnown(), conflictUpdated() (409 body)
   lib/styles.ts       static Tailwind class maps: status dot/text colours, host badge colours
   lib/shortcuts.ts    desktop keyboard map: BINDINGS (⌘/Ctrl combos), matchShortcut() (key + platform /
-                      typing context → action), shortcutHint() (per browser / Fleet.app), isTypingTarget(),
+                      typing context → action), shortcutHint() (per browser / Bearclaw.app), isTypingTarget(),
                       stepCursor(), sessionKey(), SHORTCUT_HELP (the ⌘? dialog)
   lib/palette.ts      paletteFilter(): the ⌘K palette's substring matcher / ranking
   lib/scratchpad.ts   the ⌘⇧S scratchpad: autosaved text (localStorage), floating-panel rect clampRect()/defaultRect(),
@@ -65,7 +65,7 @@ src/
   lib/prefs.ts        Settings screen prefs: TEXT_SIZES (Small / Default / Large), rootFontSize() (the <html>
                       font-size that scales every rem), CHAT_FONT_REM, termFontRem(), storage keys
   lib/jobs.ts         Jobs screen (`#/jobs`): flattenJobs() (every host's jobs), runTree() (a run's sessions under their
-                      `parent`), liveSession() (host + tmux session → the /api/fleet row), whenLabel(), outcomeTone(),
+                      `parent`), liveSession() (host + tmux session → the /api/bearclaw row), whenLabel(), outcomeTone(),
                       liveSummary(), keepLabel(), promptLabel(), isJobsLocation()
   lib/repos.ts        Settings → Git repos: per-repo interval in a draft (rowInterval()/setRowInterval(), repoKey():
                       the name, or the ~/path for duplicate names), sameSettings(), repoPosition(), syncSummary()
@@ -78,8 +78,8 @@ src/
                       indexNotes() + resolveNoteLink() (relative + `[[wiki]]` links), splitRanges(), highlightTerms()
   lib/outbox.ts       composer outbox (send with an undo delay): pure transitions (schedule / cancel / flush / retry),
                       reconcile() (dedupe optimistic bubbles against the transcript), the Outbox class (timer +
-                      one-at-a-time sender), SEND_DELAYS (Settings → Send delay, `fleet.sendDelay`)
-  lib/drafts.ts       composer drafts per session: unsent text saved in `fleet.drafts` (saveDraft, 14 days,
+                      one-at-a-time sender), SEND_DELAYS (Settings → Send delay, `bearclaw.sendDelay`)
+  lib/drafts.ts       composer drafts per session: unsent text saved in `bearclaw.drafts` (saveDraft, 14 days,
                       cleared on send) + one-shot parked text (setDraft) — "Send to session" from a note
   lib/brief.ts        brief helpers: briefTodos(), setTodoItem() (`## Todos`, legacy `## Plan`), groupResources()
                       (RESOURCE_ORDER), gitLine(), editorLabel(), todoProgress(), continueDraft()
@@ -92,9 +92,9 @@ src/
   hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
                       refresh() (runs even while hidden)
   hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term
-  hooks/useFleet.ts   fleet context + localStorage snapshot (`fleet.snapshot`)
+  hooks/useBearclaw.ts   bearclaw context + localStorage snapshot (`bearclaw.snapshot`)
   hooks/useSessionList.ts  list state shared by the mobile list and the desktop sidebar (search, filters, counts)
-  hooks/useGroups.ts  useViewMode() (`fleet.view`: list | board), useGroups(enabled): polls /api/groups
+  hooks/useGroups.ts  useViewMode() (`bearclaw.view`: list | board), useGroups(enabled): polls /api/groups
                       every 30s (4s while a pass runs) only while the Board is shown; run() = Regroup now;
                       edit() = rename / move (optimistic, POST /api/groups/edit); useBoardColumns() + moveColumn()
   hooks/useStack.ts   useStack(host, id, enabled, ms): one stack (15s in the sheet, 60s for the session's stack bar),
@@ -110,7 +110,7 @@ src/
                       per-session stat cache, debounced batched POST …/files/stat
   hooks/useAttach.ts  useAttach() (sequential uploads → paths into a textarea, paste handler, progress),
                       useFileDrop() (drop zone + overlay state), usePreventFileNavigation() (app-wide)
-  hooks/useNotes.ts   useNotesHosts() (hosts whose fleet entry has `notes`), useNotesTree() (cached, 30s poll),
+  hooks/useNotes.ts   useNotesHosts() (hosts whose bearclaw entry has `notes`), useNotesTree() (cached, 30s poll),
                       useNotesSearch() (debounced, aborts the previous), useNoteFile()
   hooks/useOutbox.ts  the session screen's Outbox: keepalive POSTs, flush on unmount / background, pagehide hand-off
   hooks/useSettings.ts, useTheme.ts, usePrefs.ts, useNow.ts, usePersistentState.ts
@@ -118,7 +118,7 @@ src/
                       useJobShow(host, name, enabled) (one job's runs, 15s poll while expanded)
   hooks/useDormant.ts DormantContext / useDormant(): hosts with dormant / recently closed sessions, index, resume / resumeAll / forget, resumeClosed / forgetClosed
   providers/          DormantProvider (polls every reachable host's /dormant every 30s; restore / forget + toasts),
-                      FleetProvider (polls /api/fleet every 5s), SettingsProvider (/api/settings once), ThemeProvider,
+                      BearclawProvider (polls /api/bearclaw every 5s), SettingsProvider (/api/settings once), ThemeProvider,
                       PrefsProvider (text size → <html> font-size, terminal text, progress notes)
   components/ui/      shadcn components — generated, edit sparingly; add with `npx shadcn@latest add <name>`
   components/         app components: StatusDot, HostBadge/HostDot, SessionRow, EditableTitle, SessionListSkeleton, ScreenHeader,
@@ -149,14 +149,14 @@ src/
 
 - **Routing**: wouter with hash location, (`#/`, `#/s/<host>/<id>`; plus `#/settings`, `#/notes…`),
   so no server SPA fallback is needed and old bookmarks/PWA installs keep working.
-- **Data**: one `FleetProvider` polls `/api/fleet` for the whole app; screens read it with
-  `useFleet()` (`fleet`, `fleetAt`, `error`, `refreshing`, `refresh()`, `applyFleet()`).
+- **Data**: one `BearclawProvider` polls `/api/bearclaw` for the whole app; screens read it with
+  `useBearclaw()` (`bearclaw`, `bearclawAt`, `error`, `refreshing`, `refresh()`, `applyBearclaw()`).
   Per-screen loops (messages, peek) use `usePoller(fn, ms)` — `fn` gets an `AbortSignal`; pass it to
   the `api.*` call. Never `setInterval` + fetch.
 - **Colours**: tokens in `src/index.css` — shadcn's (`background`, `card`, `muted-foreground`, …)
   plus `dimmer`, `status-{waiting,busy,idle,unknown,error}` and `host-{0..3}`. Use them as Tailwind
   classes (`text-status-busy`, `bg-host-2/10`); keep class names literal (maps in `lib/styles.ts`).
-  Dark is the default; light only when the OS prefers it or `fleet.theme` = `light`.
+  Dark is the default; light only when the OS prefers it or `bearclaw.theme` = `light`.
 - **Text size**: the Settings text size scales the root font-size, so size things in rem (Tailwind's
   scale, or `text-[0.8125rem]`, not `text-[13px]`); px only for hairlines and fixed chrome. Check
   390px at both Small and Large.
@@ -168,8 +168,8 @@ src/
   mobile `Switch` — two trees, not responsive classes, so the mobile layout cannot drift. Shared
   components take opt-in props (`layout="pane"`, `wide`, `desktop`, `selected`/`cursor`) whose
   defaults keep the mobile markup byte-identical; keep it that way (check a 390px iframe).
-- **Storage keys** are `fleet.*`; keep the existing ones stable, viewers' prefs live in them
-  (`fleet.detailMode`, `fleet.termFont`, `fleet.termLines`, `fleet.chatFont`, `fleet.chatHideNotes`).
+- **Storage keys** are `bearclaw.*`; keep the existing ones stable, viewers' prefs live in them
+  (`bearclaw.detailMode`, `bearclaw.termFont`, `bearclaw.termLines`, `bearclaw.chatFont`, `bearclaw.chatHideNotes`).
 - **Text from sessions is data**: render it as text (React escapes); never `dangerouslySetInnerHTML`.
   Markdown must stay DOM-only with `http(s)` links only.
 - Pure logic goes in `lib/` with a `*.test.ts` next to it.
@@ -195,7 +195,7 @@ src/
   optimistic), Run now (a confirm dialog; a 409 because a job session still works offers Run
   anyway = `force`) and the last run's outcome + live sessions. Expanding a job shows its settings
   and its runs (newest first: outcome, when, trigger, reason) with each run's sessions as a tree
-  under their `parent`; a session still in /api/fleet (same host + tmux session) shows its live
+  under their `parent`; a session still in /api/bearclaw (same host + tmux session) shows its live
   status and opens like a list row, else closed / gone. Hosts whose server or CLI predates jobs
   show a one-line note.
 - **Inline edits** (`InlineEdit`, the one inline editor — session titles and group names): click
@@ -213,41 +213,41 @@ src/
   how long ago. Resume (one click: it is what you came for), Forget and Resume all (two clicks,
   the first arms for 5 s, like Close session). A dormant group member shows on the Board as a
   dimmed card with Resume. Hidden for hosts whose server / CLI predates it.
-- **Board** (`List | Board` toggle next to the search field; `fleet.view`): sessions grouped by
-  what they work on. Groups come from `GET /api/groups` (the server's periodic `fleet group`
+- **Board** (`List | Board` toggle next to the search field; `bearclaw.view`): sessions grouped by
+  what they work on. Groups come from `GET /api/groups` (the server's periodic `bearclaw group`
   pass — stable ids, a 2–4 word label, an optional description); sessions no group claims yet
   go in **Ungrouped** (last), members that are no longer live are dropped, empty groups vanish.
   When grouping is off (`enabled: false`), or the endpoint is missing / failing, the UI groups
   by repo itself (cwd basename; `<repo>/.worktrees/<x>`, `<repo>/worktrees/<x>` and
   `<repo>/.claude/worktrees/<x>` count as `<repo>`) and says "fallback: by repo". Column order is
-  sticky (`fleet.boardOrder`): a column keeps its place as statuses change; a new one is
+  sticky (`bearclaw.boardOrder`): a column keeps its place as statuses change; a new one is
   appended (ordered by needs-you, busy, size, label) and one that comes back returns to its
   slot. Cards within a column put waiting sessions first, then most recent. Opening a card
   never scrolls the board (the flyout may cover it); the ↑/↓ cursor is scrolled clear of it. The list's search / status / host
   filters apply. "Regroup now" (`POST /api/groups/run`, toast with the result) and the last run
   ("grouped 3m ago · 1 model call") sit in the header. Mobile: a grouped list with collapsible
-  sections (label, description, status dots, count; collapsed ids in `fleet.groupsCollapsed`)
+  sections (label, description, status dots, count; collapsed ids in `bearclaw.groupsCollapsed`)
   of the usual `SessionRow`s. The List view is unchanged.
   Desktop editing (server groups only — not the repo fallback, not Ungrouped or stack columns):
   click a column's name to rename it (Enter / clicking away saves, Esc cancels); drag a card onto
   another column to move the session there, or onto "Drop here for a new group" (shown while
   dragging) and name it; "+ New group" at the end of the board makes an empty column (a group of
   yours: it stays, empty or not, until its "Delete group"); drag a column's header to reorder
-  the columns (`fleet.boardOrder`).
+  the columns (`bearclaw.boardOrder`).
   Rename and move are optimistic (`POST /api/groups/edit`) and stick: the grouping pass never
   undoes them.
 - **New session** (drawer): host, directory (radio from that host's `spawnDirs`), model (chips
   from `/api/settings` → `models`, Default = no `--model`) and an optional first prompt →
   `api.spawn`. No name field: the server names it (a targeted auto-name pass right after the
   first reply when `web.autoName` is on, else tmux `fw-hhmmss`). 400/409 are shown inline; on success a loading toast watches
-  `/api/fleet` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
+  `/api/bearclaw` (`api/spawnWatch.ts`, 1.5s for up to 45s) for `tmux_session === tmuxSession` and
   opens the session. ⌘/Ctrl+Enter starts it from any field (the prompt included — plain Enter
-  there is a newline; the dialog's button shows `⌘↵`). Remembers `fleet.spawnHost` / `fleet.spawnDirLabel.<host>`
-  and `fleet.spawnModel` (a model id no longer offered falls back to the first option). The unsent
-  first prompt is kept as a draft (`fleet.spawnDraft`, a week) across closing the form and reloads,
+  there is a newline; the dialog's button shows `⌘↵`). Remembers `bearclaw.spawnHost` / `bearclaw.spawnDirLabel.<host>`
+  and `bearclaw.spawnModel` (a model id no longer offered falls back to the first option). The unsent
+  first prompt is kept as a draft (`bearclaw.spawnDraft`, a week) across closing the form and reloads,
   and cleared once the session starts; a prefilled "Continue in new session" never touches it.
 - **Session stacks** (docs/architecture.md / ../ARCHITECTURE.md → stacks): N sibling sessions sharing one
-  context file, the **StackBrief**. Everything keys off `stack: { id, label, host } | null` on fleet rows —
+  context file, the **StackBrief**. Everything keys off `stack: { id, label, host } | null` on bearclaw rows —
   `host` is the stack's *home* (where its file is; `stackHome()`), which may differ from the session's host:
   every stack request (sheet, rename, spawn) goes to the home, and rows of one stack cluster / column by
   it whichever hosts they run on. A row without the field (older CLI) and a 404 "not found" / 501 on the
@@ -265,7 +265,7 @@ src/
     editable in place on the board column, the session screen's bar (a click; a tap there opens the
     sheet) and the Stack sheet's title (not while its markdown editor is open). Optimistic: the new
     label shows on every chip / column / bar / sheet at once and wins over `session.stack.label` until
-    the fleet has it (≤ 30s); a failure rolls back with a toast.
+    the bearclaw has it (≤ 30s); a failure rolls back with a toast.
   - **Session screen**: a slim bar under the header while the session is in a stack — label,
     "2 live · 1 closed" (loaded once, then every 60s), StackBrief, Spawn sibling. Not in one: Details →
     Session → **Spawn sibling…** (the form says it starts a new stack around this session, one Sonnet call).
@@ -274,7 +274,7 @@ src/
     ago", a host dot + name on a member running on another host than the home; a click opens that
     session wherever it runs); **StackBrief** — Summary, Resources (URLs open a new tab),
     Notes, the file path. Edit (pencil) = the whole file incl. frontmatter in a textarea (`label:`
-    renames; `## Sessions` is regenerated by fleet); Save (⌘/Ctrl+Enter; Esc cancels) PUTs it with
+    renames; `## Sessions` is regenerated by bearclaw); Save (⌘/Ctrl+Enter; Esc cancels) PUTs it with
     `expectUpdated` = the `updated` the edit started from. A 409 ("changed elsewhere") toasts, reloads
     and keeps the edit open with a note — Save again overwrites. Footer: Spawn sibling, Open in
     VS Code / Cursor (`editorUrl`, hidden when absent and on touch screens), Delete stack (click twice
@@ -305,7 +305,7 @@ src/
   - **Term** polls `peek` every 2s (200/600 lines), bare URLs linkified;
   - both follow the tail (`hooks/useFollowScroll.ts`): scrolling up pauses and shows "Latest";
     re-renders happen only when the payload changed;
-  - errors (`sessionErrorMessage`) as a pill over the pane; host-unreachable / not-in-fleet /
+  - errors (`sessionErrorMessage`) as a pill over the pane; host-unreachable / not-in-bearclaw /
     gone banners; the composer locks for a gone session or `backend: unknown`.
 - **Composer**: auto-growing textarea (unsent text is kept per session as a draft across switching and restarts; Enter sends on hardware keyboards, newline on touch;
   1..8000 chars), quick-reply chips from `/api/settings` + built-in keys Esc / Enter / Up / Down (mobile: a mini drawer above the input, hidden until you swipe up on the composer or tap its handle; swipe down hides it; desktop: always shown);
@@ -314,7 +314,7 @@ src/
   blocks the composer — it clears at once and the message shows as a dashed **pending** bubble with a
   countdown ring (text only with reduced motion), "Sending in 3s", "⌫ to cancel" (desktop) and
   **Undo**; screen readers hear "Sending in 3 seconds, press Backspace to cancel" once. Settings → Chat →
-  Send delay: Off / 3 s (default) / 5 s (`fleet.sendDelay`); Off still shows the optimistic bubble.
+  Send delay: Off / 3 s (default) / 5 s (`bearclaw.sendDelay`); Off still shows the optimistic bubble.
   - One message counts down at a time: sending another flushes the first immediately and starts
     its own window, so Backspace / Undo always cancels the most recent one. POSTs go one at a time, in
     order, as keepalive fetches.
@@ -375,7 +375,7 @@ src/
   nodes exist only with `parseMarkdown(text, { files: true })` and render as buttons.
 - **⋯ → Details** (drawer, the same content as the desktop details column): name, host · cwd,
   context, **Open in VS Code / Cursor** (`editorUrl`, a plain `vscode://` / `cursor://` link; hidden
-  on touch screens), the **brief** (below), Chat/Terminal, scrollback (`fleet.termLines`),
+  on touch screens), the **brief** (below), Chat/Terminal, scrollback (`bearclaw.termLines`),
   Auto-name → Run now (+ last run / schedule from `/api/health` when the host is this server),
   session details (tmux, backend, pid, id), Close session (two taps within 5s → `api.kill`, back
   to the list, row dropped optimistically).
@@ -385,38 +385,38 @@ src/
   `3/7` (checked items are muted, not struck through; toggling rewrites that line of `## Todos`,
   or of a legacy `## Plan`, and PUTs the body); Resources grouped Git (one row: branch · worktree
   / repo + path; legacy Branch / Worktree rows too), Pull requests, Issues, Artifacts, Specs,
-  Links, Files (collapsed by default with a count; `fleet.briefFilesOpen`), Notes — files open the
+  Links, Files (collapsed by default with a count; `bearclaw.briefFilesOpen`), Notes — files open the
   preview, URLs a new tab; **Continue in new session** (the New session form prefilled with the
   host, the session's cwd and `continuePrompt`, caret at the end). GET while Details is open,
   every 30s, every 2.5s while generating.
 - **Settings** (`#/settings`: the ⋯ More menu in the list header on mobile, the sidebar footer / rail and
   the board header on desktop, ⌘K → Settings…): Text size (Small / Default /
-  Large = chat at 13 / 15 / 17px, `fleet.chatFont`) scales the **whole** UI via the `<html>`
-  font-size (index.html applies it before first paint); Terminal text (`fleet.termFont`, in rem so
-  it follows the text size); Theme (`fleet.theme`); Progress notes (`fleet.chatHideNotes`); Send
-  delay (`fleet.sendDelay`, above). Per
+  Large = chat at 13 / 15 / 17px, `bearclaw.chatFont`) scales the **whole** UI via the `<html>`
+  font-size (index.html applies it before first paint); Terminal text (`bearclaw.termFont`, in rem so
+  it follows the text size); Theme (`bearclaw.theme`); Progress notes (`bearclaw.chatHideNotes`); Send
+  delay (`bearclaw.sendDelay`, above). Per
   viewer (localStorage), for every session. **Git repos** (`components/ReposEditor.tsx`) is per host
-  (a host switcher): Auto-sync (the `fleet.repos` launchd timer, on/off), the default interval, the
+  (a host switcher): Auto-sync (the `bearclaw.repos` launchd timer, on/off), the default interval, the
   scanned directories, and every repo with its branch, `↓↑✎` position, last sync and outcome; each row
   has Sync now and an interval picker (Default / Every 30m…7d / Off = excluded). Save writes the shown
-  host; Save to all hosts writes the same settings everywhere; Sync all now runs `fleet repos sync`.
+  host; Save to all hosts writes the same settings everywhere; Sync all now runs `bearclaw repos sync`.
   **Start directories** (`components/SpawnDirsEditor.tsx`)
-  is fleet-wide instead: the `spawnDirs` the New session form offers, one row per label with a
-  path field per host (hosts from `/api/fleet`; empty = not offered there), add / rename / delete /
+  is bearclaw-wide instead: the `spawnDirs` the New session form offers, one row per label with a
+  path field per host (hosts from `/api/bearclaw`; empty = not offered there), add / rename / delete /
   move up-down. Loaded with `GET …/spawn-dirs` from every host (this server's list is the one
   edited; a host with a different one is named). Each cell shows that host's own check (✓ is a
   directory, ✗ missing / not a directory) from a debounced dry-run `PUT` of the draft; labels and
   path syntax are checked as you type. Save (enabled when dirty and valid; Revert resets; the
   browser asks before leaving with unsaved changes) dry-runs on every reachable host, then writes
   the same list to each, lists per-host results (unreachable hosts skipped with a warning) and
-  patches the fleet snapshot with what each host now `offered`, so the New session form shows it
+  patches the bearclaw snapshot with what each host now `offered`, so the New session form shows it
   at once. Mobile: one card per entry; from `md` up a compact grid.
 - **Notes** (`#/notes[/<host>[/<path>]]`; ../ARCHITECTURE.md → notes): browse, search and read the
-  markdown notes of any host with `web.notes.root` (hosts come from `/api/fleet` entries carrying
-  `notes`; the last one used is `fleet.notesHost`). Reached from the ⋯ More menu in the mobile
+  markdown notes of any host with `web.notes.root` (hosts come from `/api/bearclaw` entries carrying
+  `notes`; the last one used is `bearclaw.notesHost`). Reached from the ⋯ More menu in the mobile
   list header, the sidebar footer / rail and the board header, ⌘K → Notes… (the palette also
   lists the first notes host's 300 most recent notes) and ⌘⇧E. Folder tree (expanded folders
-  per host in `fleet.notesOpen.<host>`, the open note's folders expand), search (180 ms debounce,
+  per host in `bearclaw.notesOpen.<host>`, the open note's folders expand), search (180 ms debounce,
   previous request aborted; words AND-ed, `"phrases"`, `#tag`; Enter opens the first hit, Esc
   clears) with snippets and the matches marked, "Recently changed" when there is no query. A
   note: title, host, path, age; Source / Rendered, Copy path, **Send to session** (pick a session
@@ -440,11 +440,11 @@ src/
 Master–detail on the same hash routes as mobile (`#/` = nothing open, `#/s/<host>/<id>` = that
 session in the pane), so a link opens the same session on either layout.
 
-- **Sidebar** (left): Fleet summary, "updated Xs ago", `+`, search (⌘F), compact status + host
+- **Sidebar** (left): Bearclaw summary, "updated Xs ago", `+`, search (⌘F), compact status + host
   filter chips, the session list (the open row is highlighted, the keyboard cursor has a ring),
   footer buttons for the palette and the shortcuts. Resizable by dragging its edge (280–560px,
-  double-click resets, ←/→ on the focused handle; `fleet.sidebarWidth`), collapsible to a rail
-  with ⌘\ (`fleet.sidebar`).
+  double-click resets, ←/→ on the focused handle; `bearclaw.sidebarWidth`), collapsible to a rail
+  with ⌘\ (`bearclaw.sidebar`).
 - **Pane**: the session screen without the back button; header adds the cwd; chat is a wider
   (max-w-4xl) readable column, the terminal uses the full width; the composer sends on Enter (also
   ⌘/Ctrl+Enter, touch-capable laptops included), Shift+Enter is a newline. Nothing open → an empty
@@ -457,16 +457,16 @@ session in the pane), so a link opens the same session on either layout.
   its width and layout, stays scrollable (the last columns scroll out from under the flyout) and
   clickable — another card switches the flyout. Its left edge resizes it (drag, or focus it and
   ←/→, Shift for bigger steps; double-click resets to 55% of the board; min 420px, max the board
-  minus 240px; `fleet.flyoutWidth`). Esc (outside a field) or ✕ closes it. A flyout narrower than
+  minus 240px; `bearclaw.flyoutWidth`). Esc (outside a field) or ✕ closes it. A flyout narrower than
   54rem lays the Details panel over the chat instead of beside it. ⌘\ does nothing on the board.
-- **Details panel** (right, ⌘I, the header button or ⌘K; ✕ top-right closes it; `fleet.inspector`,
+- **Details panel** (right, ⌘I, the header button or ⌘K; ✕ top-right closes it; `bearclaw.inspector`,
   open by default from 1440px): the mobile ⋯ drawer's content (`DetailsPanel`) — the brief first
   (summary, todos, resources, continue), then chat/terminal, scrollback, auto-name,
   tmux/backend/pid/id, Close session (click twice).
 - **New session**: the mobile form in a dialog. Toasts sit bottom-right, above the composer.
-- **Polling** is unchanged: one `/api/fleet` loop (FleetProvider, 5s) feeds the sidebar and the
+- **Polling** is unchanged: one `/api/bearclaw` loop (BearclawProvider, 5s) feeds the sidebar and the
   pane's status; the pane runs exactly one messages (3s) or peek (2s) loop. The tab title is
-  `(<needs you>) <session> · Fleet`.
+  `(<needs you>) <session> · Bearclaw`.
 
 ### Shortcuts
 
@@ -479,9 +479,9 @@ Only navigation is unmodified: ↑/↓ and Enter outside a field, Esc. With a di
 `BINDINGS` table, so they show this environment's combo.
 
 Browsers keep some combos for themselves (⌘N/T/W/Q, ⌘⇧N/T cannot be caught; ⌘L, ⌘R, ⌘1–9, ⌘[ ⌘]
-are the address bar, reload, tabs, history — Fleet.app's menu uses ⌘R, ⌘⇧R, ⌘W, ⌘[, ⌘] the same
-way), so the scheme avoids them. New session is the exception: ⌘N in Fleet.app — a native **File →
-New Session** menu item that dispatches a `fleet:command` DOM event into the page — and ⌘⇧O (the
+are the address bar, reload, tabs, history — Bearclaw.app's menu uses ⌘R, ⌘⇧R, ⌘W, ⌘[, ⌘] the same
+way), so the scheme avoids them. New session is the exception: ⌘N in Bearclaw.app — a native **File →
+New Session** menu item that dispatches a `bearclaw:command` DOM event into the page — and ⌘⇧O (the
 "new chat" combo of chat apps) in a browser tab and in the app. Everything is also in ⌘K.
 
 | Keys | Action |
@@ -490,7 +490,7 @@ New Session** menu item that dispatches a `fleet:command` DOM event into the pag
 | ⌥`↓` / ⌥`↑` | move the list cursor from the chat/terminal too (not in a field) |
 | `Enter` | open the cursor's session and focus the composer (the open one: focus the composer) |
 | ⌘/Ctrl+`F` | search (in the field: ↑/↓ move, Enter opens, Esc clears then leaves; ⌘F again: the browser's find) |
-| ⌘`N` (Fleet.app), ⌘/Ctrl+⇧`O` | new session |
+| ⌘`N` (Bearclaw.app), ⌘/Ctrl+⇧`O` | new session |
 | ⌘/Ctrl+`E`, `F2` | rename (the open session, else the cursor row / card) |
 | ⌘/Ctrl+`J` | switch chat / terminal |
 | ⌘/Ctrl+`⌫` | close the session (the open one, else the cursor row): press twice within 3 s; outside a field only (there it deletes to the line start) |

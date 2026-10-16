@@ -35,7 +35,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useFileDrop } from '@/hooks/useAttach'
 import { useBrief } from '@/hooks/useBrief'
 import { useFileStats } from '@/hooks/useFileLinks'
-import { useFleet } from '@/hooks/useFleet'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { useNow } from '@/hooks/useNow'
 import { useOutbox } from '@/hooks/useOutbox'
 import { usePersistentState } from '@/hooks/usePersistentState'
@@ -113,17 +113,17 @@ export function SessionScreen({
   detailsOverlay = false,
 }: SessionScreenProps) {
   const pane = layout === 'pane'
-  const { fleet, refresh: refreshFleet, applyFleet } = useFleet()
+  const { bearclaw, refresh: refreshBearclaw, applyBearclaw } = useBearclaw()
   const settings = useSettings()
   const [, navigate] = useLocation()
   const now = useNow(1000)
-  const session = findSession(fleet, host, id)
-  const hostEntry = fleet?.hosts.find((h) => h.name === host) ?? null
+  const session = findSession(bearclaw, host, id)
+  const hostEntry = bearclaw?.hosts.find((h) => h.name === host) ?? null
 
   // View prefs (localStorage). Text size, terminal text and
   // progress notes are global (the Settings screen).
-  const [mode, setMode] = usePersistentState<DetailMode>('fleet.detailMode', 'chat', parseMode)
-  const [termLines, setTermLines] = usePersistentState<number>('fleet.termLines', 200, parseSize(TERM_LINES))
+  const [mode, setMode] = usePersistentState<DetailMode>('bearclaw.detailMode', 'chat', parseMode)
+  const [termLines, setTermLines] = usePersistentState<number>('bearclaw.termLines', 200, parseSize(TERM_LINES))
   const { termFont, hideNotes, sendDelay } = usePrefs()
 
   const [menuOpen, setMenuOpen] = useState(false)
@@ -289,7 +289,7 @@ export function SessionScreen({
   const noTranscript = mode === 'chat' && chatErr instanceof ApiError && chatErr.status === 404 && !isSessionGone(chatErr)
   const errText = !activeErr || gone ? null : noTranscript ? (chat ? 'No transcript for this session yet' : null) : sessionErrorMessage(activeErr)
   const hostDown = hostEntry?.ok === false
-  const missing = !!fleet && !hostDown && !session
+  const missing = !!bearclaw && !hostDown && !session
 
   // --- actions -------------------------------------------------------------
   const afterSteer = () => {
@@ -465,8 +465,8 @@ export function SessionScreen({
     stack: stackMenu,
     onClosed: () => {
       // Drop it from the list now; the next polls confirm (discovery caches ~2s).
-      if (fleet) applyFleet(withoutSession(fleet, host, id))
-      setTimeout(refreshFleet, 2500)
+      if (bearclaw) applyBearclaw(withoutSession(bearclaw, host, id))
+      setTimeout(refreshBearclaw, 2500)
       navigate('/', { replace: true })
     },
   }
@@ -595,7 +595,7 @@ export function SessionScreen({
                 ? `${host} unreachable: ${hostEntry?.error || 'no response'}`
                 : gone
                   ? 'This session has ended.'
-                  : 'Not in the fleet list right now — it may have ended.'}
+                  : 'Not in the bearclaw list right now — it may have ended.'}
             </span>
           </div>
         </div>

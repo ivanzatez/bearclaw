@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { configPath, expandHome, loadConfig, normalizeConfig, resolveBinary, resolveFleetBin } from '../lib/config.mjs';
+import { configPath, expandHome, loadConfig, normalizeConfig, resolveBinary, resolveBearclawBin } from '../lib/config.mjs';
 
 function tmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-web-cfg-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-web-cfg-'));
 }
 
 const HOME = '/home/tester';
@@ -38,10 +38,10 @@ test('expandHome expands ~ and ~/ only', () => {
   assert.equal(expandHome('~other/x', HOME), '~other/x');
 });
 
-test('configPath: FLEET_CONFIG > XDG_CONFIG_HOME > ~/.config', () => {
-  assert.equal(configPath({ FLEET_CONFIG: '~/x.json' }, HOME), `${HOME}/x.json`);
-  assert.equal(configPath({ XDG_CONFIG_HOME: '/xdg' }, HOME), '/xdg/fleet/config.json');
-  assert.equal(configPath({}, HOME), `${HOME}/.config/fleet/config.json`);
+test('configPath: BEARCLAW_CONFIG > XDG_CONFIG_HOME > ~/.config', () => {
+  assert.equal(configPath({ BEARCLAW_CONFIG: '~/x.json' }, HOME), `${HOME}/x.json`);
+  assert.equal(configPath({ XDG_CONFIG_HOME: '/xdg' }, HOME), '/xdg/bearclaw/config.json');
+  assert.equal(configPath({}, HOME), `${HOME}/.config/bearclaw/config.json`);
 });
 
 test('normalizeConfig maps the shared config to server settings', () => {
@@ -76,8 +76,8 @@ test('normalizeConfig defaults: missing config = single loopback host', () => {
   assert.equal(normalizeConfig({ self: 'a' }, { env: {}, home: HOME, found: true }).bind, '0.0.0.0');
 });
 
-test('normalizeConfig env overrides: FLEET_WEB_PORT/PORT, FLEET_WEB_BIND, FLEET_WEB_UI', () => {
-  const env = { FLEET_WEB_PORT: '7799', FLEET_WEB_BIND: '127.0.0.1', FLEET_WEB_UI: '~/ui' };
+test('normalizeConfig env overrides: BEARCLAW_WEB_PORT/PORT, BEARCLAW_WEB_BIND, BEARCLAW_WEB_UI', () => {
+  const env = { BEARCLAW_WEB_PORT: '7799', BEARCLAW_WEB_BIND: '127.0.0.1', BEARCLAW_WEB_UI: '~/ui' };
   const cfg = normalizeConfig(SAMPLE, { env, home: HOME });
   assert.equal(cfg.port, 7799);
   assert.equal(cfg.bind, '127.0.0.1');
@@ -103,15 +103,15 @@ test('normalizeConfig quickReplies accepts { label, kind, value }: text kept, ke
   assert.deepEqual(cfg.quickReplies, [{ label: 'Go', text: 'Go on.' }]);
 });
 
-test('normalizeConfig web.autoName: defaults off (opt-in) / 5 min, validated, FLEET_WEB_AUTONAME overrides', () => {
+test('normalizeConfig web.autoName: defaults off (opt-in) / 5 min, validated, BEARCLAW_WEB_AUTONAME overrides', () => {
   assert.deepEqual(normalizeConfig({}, { env: {}, home: HOME }).autoName, { enabled: false, intervalMinutes: 5 });
   assert.equal(normalizeConfig({ web: { autoName: { enabled: true } } }, { env: {}, home: HOME }).autoName.enabled, true);
   assert.deepEqual(normalizeConfig({ web: { autoName: { enabled: false, intervalMinutes: 15 } } }, { env: {}, home: HOME }).autoName, {
     enabled: false,
     intervalMinutes: 15,
   });
-  assert.equal(normalizeConfig({}, { env: { FLEET_WEB_AUTONAME: '0' }, home: HOME }).autoName.enabled, false);
-  assert.equal(normalizeConfig({ web: { autoName: { enabled: false } } }, { env: { FLEET_WEB_AUTONAME: '1' }, home: HOME }).autoName.enabled, true);
+  assert.equal(normalizeConfig({}, { env: { BEARCLAW_WEB_AUTONAME: '0' }, home: HOME }).autoName.enabled, false);
+  assert.equal(normalizeConfig({ web: { autoName: { enabled: false } } }, { env: { BEARCLAW_WEB_AUTONAME: '1' }, home: HOME }).autoName.enabled, true);
   assert.throws(() => normalizeConfig({ web: { autoName: { intervalMinutes: 0 } } }, { env: {}, home: HOME }), /intervalMinutes/);
   assert.throws(() => normalizeConfig({ web: { autoName: { enabled: 'yes' } } }, { env: {}, home: HOME }), /autoName.enabled/);
   assert.throws(() => normalizeConfig({ web: { autoName: true } } , { env: {}, home: HOME }), /autoName/);
@@ -140,37 +140,37 @@ test('normalizeConfig rejects broken shapes with a pointed message', () => {
 test('resolveBinary: explicit > PATH > fallbacks > bare name', () => {
   const dir = tmp();
   try {
-    const bin = path.join(dir, 'fleet');
+    const bin = path.join(dir, 'bearclaw');
     fs.writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 });
-    assert.equal(resolveBinary('fleet', { explicit: '~/bin/fleet', env: {}, home: HOME }), `${HOME}/bin/fleet`);
-    assert.equal(resolveBinary('fleet', { env: { PATH: dir } }), bin);
-    assert.equal(resolveBinary('fleet', { env: { PATH: '' }, extraDirs: [dir] }), bin);
+    assert.equal(resolveBinary('bearclaw', { explicit: '~/bin/bearclaw', env: {}, home: HOME }), `${HOME}/bin/bearclaw`);
+    assert.equal(resolveBinary('bearclaw', { env: { PATH: dir } }), bin);
+    assert.equal(resolveBinary('bearclaw', { env: { PATH: '' }, extraDirs: [dir] }), bin);
     assert.equal(resolveBinary('definitely-not-a-binary-xyz', { env: { PATH: dir } }), 'definitely-not-a-binary-xyz');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('resolveFleetBin checks ~/.local/bin and ~/.cargo/bin, FLEET_BIN wins', () => {
+test('resolveBearclawBin checks ~/.local/bin and ~/.cargo/bin, BEARCLAW_BIN wins', () => {
   const home = tmp();
   try {
     const cargo = path.join(home, '.cargo', 'bin');
     fs.mkdirSync(cargo, { recursive: true });
-    fs.writeFileSync(path.join(cargo, 'fleet'), '#!/bin/sh\n', { mode: 0o755 });
-    assert.equal(resolveFleetBin({}, { env: { PATH: '' }, home }), path.join(cargo, 'fleet'));
-    assert.equal(resolveFleetBin({ fleetBin: '/x/fleet' }, { env: { PATH: '' }, home }), '/x/fleet');
-    assert.equal(resolveFleetBin({ fleetBin: '/x/fleet' }, { env: { PATH: '', FLEET_BIN: '/y/fleet' }, home }), '/y/fleet');
+    fs.writeFileSync(path.join(cargo, 'bearclaw'), '#!/bin/sh\n', { mode: 0o755 });
+    assert.equal(resolveBearclawBin({}, { env: { PATH: '' }, home }), path.join(cargo, 'bearclaw'));
+    assert.equal(resolveBearclawBin({ bearclawBin: '/x/bearclaw' }, { env: { PATH: '' }, home }), '/x/bearclaw');
+    assert.equal(resolveBearclawBin({ bearclawBin: '/x/bearclaw' }, { env: { PATH: '', BEARCLAW_BIN: '/y/bearclaw' }, home }), '/y/bearclaw');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('loadConfig reads $FLEET_CONFIG, tolerates a missing file, rejects bad JSON', () => {
+test('loadConfig reads $BEARCLAW_CONFIG, tolerates a missing file, rejects bad JSON', () => {
   const dir = tmp();
   try {
     const file = path.join(dir, 'config.json');
     fs.writeFileSync(file, JSON.stringify(SAMPLE));
-    const cfg = loadConfig({ env: { FLEET_CONFIG: file, PATH: '' }, home: HOME, log: quiet });
+    const cfg = loadConfig({ env: { BEARCLAW_CONFIG: file, PATH: '' }, home: HOME, log: quiet });
     assert.equal(cfg.configFile, file);
     assert.equal(cfg.self, 'laptop');
 
@@ -179,9 +179,9 @@ test('loadConfig reads $FLEET_CONFIG, tolerates a missing file, rejects bad JSON
     assert.equal(missing.self, 'local');
 
     fs.writeFileSync(file, '{ nope');
-    assert.throws(() => loadConfig({ env: { FLEET_CONFIG: file }, home: HOME, log: quiet }), /not valid JSON/);
+    assert.throws(() => loadConfig({ env: { BEARCLAW_CONFIG: file }, home: HOME, log: quiet }), /not valid JSON/);
     fs.writeFileSync(file, JSON.stringify({ hosts: 1 }));
-    assert.throws(() => loadConfig({ env: { FLEET_CONFIG: file }, home: HOME, log: quiet }), /invalid fleet config .*hosts/);
+    assert.throws(() => loadConfig({ env: { BEARCLAW_CONFIG: file }, home: HOME, log: quiet }), /invalid bearclaw config .*hosts/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -1,11 +1,11 @@
-// Types for the fleet web HTTP API (see web/ARCHITECTURE.md → "HTTP API").
+// Types for the bearclaw web HTTP API (see web/ARCHITECTURE.md → "HTTP API").
 // The API is a stable contract: fields are only ever added, so unknown extra
 // fields are fine and everything a UI does not strictly need is optional.
 
 export type SessionStatus = 'busy' | 'idle' | 'waiting' | 'unknown'
 export type Backend = 'iterm' | 'tmux' | 'unknown'
 
-/** One Claude Code session: a `fleet list --json` row plus the host it runs on. */
+/** One Claude Code session: a `bearclaw list --json` row plus the host it runs on. */
 export interface Session {
   host: string
   session_id: string
@@ -38,18 +38,18 @@ export interface Session {
   /** "Open in editor" link for the cwd (like Brief.editorUrl, without the git-root lookup). Older servers omit it. */
   editorUrl?: string | null
   /**
-   * The session stack this session belongs to (`fleet list --json` → `stack`); null = in none.
+   * The session stack this session belongs to (`bearclaw list --json` → `stack`); null = in none.
    * Older CLIs omit the field entirely (undefined = this host knows no stacks).
    */
   stack?: StackRef | null
-  /** The coding agent running it (`fleet list --json` → `harness`); older CLIs omit it (= claude). */
+  /** The coding agent running it (`bearclaw list --json` → `harness`); older CLIs omit it (= claude). */
   harness?: HarnessId | string | null
   /** The model it runs, when known. */
   model?: string | null
   /** Absolute transcript path (Codex / pi only). */
   transcript?: string | null
   /**
-   * The scheduled job run that started it (`fleet list --json` → `origin`, docs/cli.md → Jobs);
+   * The scheduled job run that started it (`bearclaw list --json` → `origin`, docs/cli.md → Jobs);
    * null = started by hand. Older CLIs omit it.
    */
   origin?: SessionOrigin | null
@@ -63,10 +63,10 @@ export interface SessionOrigin {
   run: string
 }
 
-/** The coding agents fleet drives — see docs/cli.md → Harnesses. */
+/** The coding agents bearclaw drives — see docs/cli.md → Harnesses. */
 export type HarnessId = 'claude' | 'codex' | 'pi'
 
-/** GET /api/hosts/:host/harnesses → `harnesses[]` (`fleet harness list --json`). */
+/** GET /api/hosts/:host/harnesses → `harnesses[]` (`bearclaw harness list --json`). */
 export interface HarnessInfo {
   id: HarnessId | string
   label: string
@@ -154,8 +154,8 @@ export interface Host {
   sessions: Session[]
 }
 
-/** GET /api/fleet — self first, then peers. */
-export interface FleetResponse {
+/** GET /api/bearclaw — self first, then peers. */
+export interface BearclawResponse {
   self: string
   hosts: Host[]
   /** When the merged snapshot was built (epoch ms); absent on `?local=1`. */
@@ -197,7 +197,7 @@ export interface Settings {
   operator?: { enabled: boolean; hosts?: string[] }
 }
 
-/** GET/POST /api/operator — this server's operator session (null until it shows in the fleet). */
+/** GET/POST /api/operator — this server's operator session (null until it shows in the bearclaw). */
 export interface OperatorStatus {
   host: string
   dir: string
@@ -415,7 +415,7 @@ export interface KillResponse {
   terminal: string
 }
 
-/** POST /api/hosts/:host/sessions/:id/rename → `fleet rename --json` (409 when held). */
+/** POST /api/hosts/:host/sessions/:id/rename → `bearclaw rename --json` (409 when held). */
 export interface RenameResponse {
   ok: boolean
   host: string
@@ -442,7 +442,7 @@ export interface GroupMember {
   dormant?: boolean
 }
 
-/** A smart group of sessions (`fleet group`). Ids are stable across runs. */
+/** A smart group of sessions (`bearclaw group`). Ids are stable across runs. */
 export interface SessionGroup {
   id: string
   label: string
@@ -519,7 +519,7 @@ export interface StackMember {
   briefExists?: boolean
 }
 
-/** `fleet stack show --json` (+ the server's `editorUrl`). */
+/** `bearclaw stack show --json` (+ the server's `editorUrl`). */
 export interface StackView {
   host: string
   id: string
@@ -534,7 +534,7 @@ export interface StackView {
   editedAt: string | null
   /** The sentence every sibling's first prompt starts with (on the stack's home host). */
   contextLine: string
-  /** The same for a sibling on another host (`fleet -H <home> stack …`); older CLIs omit it. */
+  /** The same for a sibling on another host (`bearclaw -H <home> stack …`); older CLIs omit it. */
   remoteContextLine?: string
   members: StackMember[]
   /** The whole file, frontmatter included (what the editor edits). */
@@ -726,7 +726,7 @@ export interface NoteFile {
   editorUrl: string | null
 }
 
-// --- Subscription usage (GET /api/hosts/:host/usage → `fleet usage --json`) -------------------
+// --- Subscription usage (GET /api/hosts/:host/usage → `bearclaw usage --json`) -------------------
 
 export interface UsageAccount {
   uuid: string | null
@@ -776,7 +776,7 @@ export interface UsageResponse {
   error: string | null
 }
 
-/** A Claude session inside a dormant entry (`fleet restore --json`). */
+/** A Claude session inside a dormant entry (`bearclaw restore --json`). */
 export interface DormantSession {
   sessionId: string
   name: string | null
@@ -787,7 +787,7 @@ export interface DormantSession {
 /** One dormant tmux session (`kind: tmux`) or lone Claude session (`kind: claude`) a reboot left. */
 export interface DormantView {
   kind: 'tmux' | 'claude' | string
-  /** What `fleet restore <target>` takes: the tmux name, or the full session id. */
+  /** What `bearclaw restore <target>` takes: the tmux name, or the full session id. */
   target: string
   /** The tmux name, or the Claude title. */
   name: string
@@ -844,7 +844,7 @@ export interface ForgetResponse {
   forgotten: string[]
 }
 
-// --- Git repos (Settings → Git repos; GET/PUT /api/hosts/:host/repos → `fleet repos`) -----------
+// --- Git repos (Settings → Git repos; GET/PUT /api/hosts/:host/repos → `bearclaw repos`) -----------
 
 /** Config `repos` on one host (defaults filled in). Keys of `overrides` / `exclude`: a dir name or a `~/…` path. */
 export interface ReposSettings {
@@ -857,7 +857,7 @@ export interface ReposSettings {
 
 export type RepoOutcome = 'updated' | 'current' | 'ahead' | 'diverged' | 'blocked' | 'busy' | 'noUpstream' | 'noRemote' | 'fetchFailed'
 
-/** One row of `fleet repos --json --all`. */
+/** One row of `bearclaw repos --json --all`. */
 export interface RepoRow {
   name: string
   /** `~/…` */
@@ -889,7 +889,7 @@ export interface ReposResponse {
   saved?: boolean
 }
 
-/** One result of `fleet repos sync --json`. */
+/** One result of `bearclaw repos sync --json`. */
 export interface RepoSyncResult {
   name: string
   path: string
@@ -900,7 +900,7 @@ export interface RepoSyncResult {
   detail?: string
 }
 
-/** A `fleet prs` column id (docs/cli.md → Pull requests). */
+/** A `bearclaw prs` column id (docs/cli.md → Pull requests). */
 export type PrColumnId = 'unseenMentions' | 'waitingOnMe' | 'reviewMine' | 'readyToMergeMine' | 'draftMine' | 'waitingOnAuthor'
 
 export interface PrColumn {
@@ -971,7 +971,7 @@ export interface PrsResponse {
   prs: PullRequest[]
 }
 
-/** A PR checked out in a worktree (`fleet pr checkout --json`). */
+/** A PR checked out in a worktree (`bearclaw pr checkout --json`). */
 export interface PrWorktree {
   owner: string
   repo: string
@@ -1022,7 +1022,7 @@ export interface JobRun {
   sessions: JobRunSession[]
 }
 
-/** A live session of a job (`fleet jobs --json` → `live[]`). */
+/** A live session of a job (`bearclaw jobs --json` → `live[]`). */
 export interface JobLive {
   run: string | null
   sessionId: string
@@ -1031,7 +1031,7 @@ export interface JobLive {
   title: string | null
 }
 
-/** One job (`fleet jobs --json` / `fleet jobs show <name> --json`) plus the host it lives on. */
+/** One job (`bearclaw jobs --json` / `bearclaw jobs show <name> --json`) plus the host it lives on. */
 export interface Job {
   host?: string
   name: string
