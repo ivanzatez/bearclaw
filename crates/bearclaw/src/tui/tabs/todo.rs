@@ -30,6 +30,8 @@ pub struct TodoView {
     list: ListState,
     input: Option<LineInput>,
     confirm_delete: Option<u64>,
+    /// Session ids alive at the last poll (`None` until the first one).
+    live: Option<std::collections::HashSet<String>>,
     /// How a task link opens — swapped out in tests, which must not launch a browser.
     pub(crate) opener: fn(&str) -> Result<(), String>,
 }
@@ -55,6 +57,7 @@ impl TodoView {
             list: ListState::default(),
             input: None,
             confirm_delete: None,
+            live: None,
             opener: open_url,
         }
     }
@@ -110,8 +113,18 @@ impl TodoView {
         }
     }
 
-    fn row(it: &Item, width: usize) -> Line<'static> {
+    /// In progress, but its session is gone.
+    fn orphaned(&self, it: &Item) -> bool {
+        it.status == Status::Doing
+            && it
+                .session
+                .as_ref()
+                .is_some_and(|s| self.live.as_ref().is_some_and(|live| !live.contains(s)))
+    }
+
+    fn row(it: &Item, width: usize, orphaned: bool) -> Line<'static> {
         let (mark, color) = match it.status {
+            Status::Doing if orphaned => ("◌", Color::DarkGray),
             Status::Doing => ("●", Color::Cyan),
             Status::Open => ("○", Color::Yellow),
             Status::Done => ("✓", Color::DarkGray),
@@ -119,7 +132,10 @@ impl TodoView {
         let who = it
             .session_label
             .as_deref()
-            .map(|l| format!("  ⧉ {}", fit(l, 24)))
+            .map(|l| {
+                let ended = if orphaned { " (ended)" } else { "" };
+                format!("  ⧉ {}{ended}", fit(l, 24))
+            })
             .unwrap_or_default();
         let task = if it.task_url.is_some() {
             "  ↗ task"
@@ -127,7 +143,7 @@ impl TodoView {
             ""
         };
         let text_w = width.saturating_sub(3 + width_of(&who) + width_of(task) + 1);
-        let text_style = if it.status == Status::Done {
+        let text_style = if it.status == Status::Done || orphaned {
             Style::default().fg(Color::DarkGray)
         } else {
             Style::default()
@@ -164,6 +180,10 @@ impl View for TodoView {
         if let Some(input) = self.input.as_mut() {
             input.paste(text);
         }
+    }
+
+    fn live(&mut self, ids: &[String]) {
+        self.live = Some(ids.iter().cloned().collect());
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -220,7 +240,10 @@ impl View for TodoView {
         let width = body.width as usize;
         let items: Vec<ListItem> = order
             .iter()
-            .map(|&i| ListItem::new(Self::row(&self.todo.items[i], width)))
+            .map(|&i| {
+                let it = &self.todo.items[i];
+                ListItem::new(Self::row(it, width, self.orphaned(it)))
+            })
             .collect();
         self.list.select(Some(self.sel));
         let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
@@ -373,6 +396,19 @@ mod tests {
         );
         assert!(a < b && b < c, "{s}");
         assert!(s.contains("⧉ work-2") && s.contains("↗ task"), "{s}");
+    }
+
+    #[test]
+    fn items_of_ended_sessions_are_marked() {
+        let (_d, mut v) = seeded();
+        v.live(&["sess-c".to_string()]);
+        let s = screen(&mut v, 100, 10);
+        assert!(
+            s.contains("◌ Permission error") && s.contains("ended"),
+            "{s}"
+        );
+        v.live(&["sess-a".to_string()]);
+        assert!(screen(&mut v, 100, 10).contains("● Permission error"));
     }
 
     #[test]

@@ -70,7 +70,8 @@ fn calling(session: Option<&str>) -> Result<(String, String)> {
         Some(t) => discovery::resolve(t).map_err(Error::Other)?,
         None => discovery::origin().ok_or_else(|| {
             Error::Other(
-                "not inside a Claude session (pass --session <target>, or use `bearclaw todo add`)"
+                "not inside a supervised Claude session — skip the todo and sticky-note steps \
+                 (a person can pass --session <target>, or use `bearclaw todo add`)"
                     .into(),
             )
         })?,
@@ -88,6 +89,22 @@ fn mark(status: Status) -> &'static str {
         Status::Open => "○",
         Status::Done => "✓",
     }
+}
+
+/// The item's text, one line and not empty — and its task link has to be a web link.
+fn checked(text: &[String], task: Option<&str>) -> Result<String> {
+    let line = todo::one_line(&text.join(" "), todo::TEXT_MAX);
+    if line.is_empty() {
+        return Err(Error::Other("the item needs some text".into()));
+    }
+    if let Some(t) = task
+        && !todo::task_url_ok(t)
+    {
+        return Err(Error::Other(format!(
+            "--task must be an http(s) link: {t:?}"
+        )));
+    }
+    Ok(line)
 }
 
 pub fn run_todo(action: Option<TodoAction>) -> Result<()> {
@@ -115,7 +132,8 @@ pub fn run_todo(action: Option<TodoAction>) -> Result<()> {
             Ok(())
         }
         TodoAction::Add { text, task } => {
-            let id = todo::update(&path, |t| Ok(t.add(&text.join(" "), task.as_deref(), None)))?;
+            let line = checked(&text, task.as_deref())?;
+            let id = todo::update(&path, |t| Ok(t.add(&line, task.as_deref(), None)))?;
             println!("#{id}");
             Ok(())
         }
@@ -124,9 +142,10 @@ pub fn run_todo(action: Option<TodoAction>) -> Result<()> {
             task,
             session,
         } => {
+            let line = checked(&text, task.as_deref())?;
             let (sid, label) = calling(session.as_deref())?;
             let id = todo::update(&path, |t| {
-                Ok(t.set_for(&sid, &label, &text.join(" "), task.as_deref()))
+                Ok(t.set_for(&sid, &label, &line, task.as_deref()))
             })?;
             println!("#{id}");
             Ok(())

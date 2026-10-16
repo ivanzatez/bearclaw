@@ -329,6 +329,8 @@ struct Dash {
     term_area: Rect,
     /// `c`: the directory prompt for a new session.
     new_session: Option<LineInput>,
+    /// The first prompt for that session, when a todo item started it.
+    new_prompt: Option<String>,
     /// Sessions' todo lines and sticky notes, by session id.
     notes: HashMap<String, SessionNote>,
     /// A new session being started in the background: its tmux session name, or why not.
@@ -800,6 +802,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         term: None,
         term_area: Rect::default(),
         new_session: None,
+        new_prompt: None,
         notes: HashMap::new(),
         spawning: None,
     };
@@ -880,6 +883,8 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             last_poll = Some(Instant::now());
             dash.dormant = crate::core::snapshot::dormant_count();
             dash.notes = load_notes(&rows);
+            let live: Vec<String> = rows.iter().filter_map(|r| r.session_id.clone()).collect();
+            tabs.live(&live);
             // New sessions get a title, and a session whose first prompt has
             // landed since gets a better one. A no-op once the bearclaw is titled.
             naming.autotitle(&rows);
@@ -1051,14 +1056,17 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             {
                 match input.key(k) {
                     InputResult::Editing => {}
-                    InputResult::Cancel => dash.new_session = None,
+                    InputResult::Cancel => {
+                        dash.new_session = None;
+                        dash.new_prompt = None;
+                    }
                     InputResult::Quit => break,
                     InputResult::Submit(dir) => {
                         dash.new_session = None;
                         let dir = crate::core::tools::expand_tilde(dir.trim());
                         log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
                         log.truncate(EVENT_CAP);
-                        dash.spawning = Some(spawn_in_tmux(dir, None));
+                        dash.spawning = Some(spawn_in_tmux(dir, dash.new_prompt.take()));
                     }
                 }
             }
@@ -1141,12 +1149,13 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         }
                     }
                 }
+                // Ask where first: the directory prompt is also the "yes, start it".
                 Outcome::Spawn(prompt) => {
                     tabs.switch(Tab::Sessions);
-                    let dir = crate::core::tools::expand_tilde(&default_session_dir());
-                    log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
-                    log.truncate(EVENT_CAP);
-                    dash.spawning = Some(spawn_in_tmux(dir, Some(prompt)));
+                    let mut input = LineInput::new("start a session on it in");
+                    input.buf = default_session_dir();
+                    dash.new_session = Some(input);
+                    dash.new_prompt = Some(prompt);
                 }
                 Outcome::Edit(path) => match Editor::open(path) {
                     Ok(e) => dash.editor = Some(e),
@@ -2119,6 +2128,7 @@ mod tests {
             term: None,
             term_area: Rect::default(),
             new_session: None,
+            new_prompt: None,
             notes: HashMap::new(),
             spawning: None,
         }

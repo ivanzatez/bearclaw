@@ -198,6 +198,8 @@ pub trait View {
     fn refresh(&mut self);
     /// Pasted text, for a view with a text input open; dropped otherwise.
     fn paste(&mut self, _text: &str) {}
+    /// The session ids alive right now, after every poll.
+    fn live(&mut self, _ids: &[String]) {}
     /// A text input is open: every key is its, Tab and `q` included.
     fn typing(&self) -> bool {
         false
@@ -265,6 +267,12 @@ impl Tabs {
     pub fn tick_all(&mut self) {
         for v in &mut self.views {
             v.tick();
+        }
+    }
+
+    pub fn live(&mut self, ids: &[String]) {
+        for v in &mut self.views {
+            v.live(ids);
         }
     }
 

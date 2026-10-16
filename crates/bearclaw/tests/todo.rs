@@ -49,7 +49,22 @@ fn todo_round_trip_through_the_cli() {
         .output()
         .unwrap();
     assert!(!out.status.success());
-    assert!(stderr(&out).contains("--session"), "{}", stderr(&out));
+    // Headless runs and subagents read this too: it tells them to leave the list alone.
+    let err = stderr(&out);
+    assert!(err.contains("--session") && err.contains("skip"), "{err}");
+    assert!(
+        !cmd(&env)
+            .args(["todo", "add", " "])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let bad_task = cmd(&env)
+        .args(["todo", "add", "x", "--task", "file:///etc"])
+        .output()
+        .unwrap();
+    assert!(!bad_task.status.success());
 
     assert!(
         cmd(&env)

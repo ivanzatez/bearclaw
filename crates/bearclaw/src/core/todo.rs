@@ -53,15 +53,27 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// One line, at most `max` characters: newlines and runs of whitespace become one space.
+/// One line, at most `max` characters: newlines and runs of whitespace become one space, and
+/// control characters (escape sequences) are dropped — this text is printed to terminals and
+/// typed into shells.
 pub fn one_line(s: &str, max: usize) -> String {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let clean: String = s
+        .chars()
+        .filter(|c| !c.is_control() || c.is_whitespace())
+        .collect();
+    let flat = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() <= max {
         return flat;
     }
     let mut cut: String = flat.chars().take(max.saturating_sub(1)).collect();
     cut.push('…');
     cut
+}
+
+/// A task link worth keeping: an `http(s)` URL with nothing that could break a line.
+pub fn task_url_ok(url: &str) -> bool {
+    (url.starts_with("https://") || url.starts_with("http://"))
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 impl Todo {
@@ -179,7 +191,7 @@ pub const SESSION_CONTEXT: &str = "# Your work: todo item + sticky note
 The user follows every Claude session from the bearclaw dashboard. Keep two things current there:
 - Todo item: one line saying what you are working on (e.g. \"Permission error in the agent loader\"). As soon as you know, run `bearclaw todo set \"<one line>\"`, adding `--task <Productive task URL>` when there is one. Run it again when the focus changes, and `bearclaw todo done` when the work is finished. If your first prompt names todo item #N, run `bearclaw todo claim N` instead of `set`.
 - Sticky note: up to 6 short bullets, what you are doing and what is done so far. Replace it after meaningful progress: `bearclaw sticky set \"<bullet>\" \"<bullet>\" ...`.
-Both commands find your session by themselves.
+Both commands find your session by themselves. If bearclaw says you are not inside a session, or you are a subagent, skip both.
 ";
 
 /// `$BEARCLAW_TODO_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/bearclaw/todo.json`.
@@ -277,6 +289,10 @@ mod tests {
     #[test]
     fn one_line_folds_and_caps() {
         assert_eq!(one_line("  a\n  b\r\nc  ", 50), "a b c");
+        // Control characters never reach a terminal or a shell line typed with them.
+        assert_eq!(one_line("a\u{1b}[31mb\u{7}c", 50), "a[31mbc");
+        assert!(task_url_ok("https://app.example/tasks/7"));
+        assert!(!task_url_ok("javascript:x") && !task_url_ok("https://x\ny"));
         assert_eq!(one_line("abcdef", 4), "abc…");
         assert_eq!(one_line("", 10), "");
     }
