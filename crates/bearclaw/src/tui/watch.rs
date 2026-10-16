@@ -1027,7 +1027,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         let dir = crate::core::tools::expand_tilde(dir.trim());
                         log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
                         log.truncate(EVENT_CAP);
-                        dash.spawning = Some(spawn_in_tmux(dir));
+                        dash.spawning = Some(spawn_in_tmux(dir, None));
                     }
                 }
             }
@@ -1092,6 +1092,30 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 Outcome::Log(msg) => {
                     log.insert(0, Ev::now("·", msg));
                     log.truncate(EVENT_CAP);
+                }
+                Outcome::Session(id) => {
+                    tabs.switch(Tab::Sessions);
+                    match rows
+                        .iter()
+                        .find(|r| r.session_id.as_deref() == Some(id.as_str()))
+                    {
+                        Some(r) => {
+                            selected = Some(r.key());
+                            let r = r.clone();
+                            open_session(&r, &mut dash, &mut log);
+                        }
+                        None => {
+                            log.insert(0, Ev::now("·", "that session has ended".into()));
+                            log.truncate(EVENT_CAP);
+                        }
+                    }
+                }
+                Outcome::Spawn(prompt) => {
+                    tabs.switch(Tab::Sessions);
+                    let dir = crate::core::tools::expand_tilde(&default_session_dir());
+                    log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
+                    log.truncate(EVENT_CAP);
+                    dash.spawning = Some(spawn_in_tmux(dir, Some(prompt)));
                 }
                 Outcome::Edit(path) => match Editor::open(path) {
                     Ok(e) => dash.editor = Some(e),
@@ -1360,8 +1384,12 @@ fn default_session_dir() -> String {
         .unwrap_or_default()
 }
 
-/// Start Claude (the configured launcher) in a new tmux session in `dir`, off the UI thread.
-fn spawn_in_tmux(dir: String) -> Receiver<std::result::Result<String, String>> {
+/// Start Claude (the configured launcher, with `prompt` as its first one) in a new tmux
+/// session in `dir`, off the UI thread.
+fn spawn_in_tmux(
+    dir: String,
+    prompt: Option<String>,
+) -> Receiver<std::result::Result<String, String>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         use crate::core::harness::Harness;
@@ -1371,7 +1399,9 @@ fn spawn_in_tmux(dir: String) -> Receiver<std::result::Result<String, String>> {
             backend::spawn_tagged(
                 crate::core::discovery::Backend::Tmux,
                 &dir,
-                backend::Prompt::None,
+                prompt
+                    .as_deref()
+                    .map_or(backend::Prompt::None, backend::Prompt::Inline),
                 None,
                 None,
                 false,

@@ -10,6 +10,7 @@ pub mod prs;
 pub mod session;
 pub mod settings;
 pub mod tasks;
+pub mod todo;
 pub mod usage;
 
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ pub enum Tab {
     Sessions,
     Prs,
     Tasks,
+    Todo,
     Usage,
     Brain,
     Notes,
@@ -34,10 +36,11 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [
+    pub const ALL: [Tab; 8] = [
         Tab::Sessions,
         Tab::Prs,
         Tab::Tasks,
+        Tab::Todo,
         Tab::Usage,
         Tab::Brain,
         Tab::Notes,
@@ -49,6 +52,7 @@ impl Tab {
             Tab::Sessions => "Sessions",
             Tab::Prs => "PRs",
             Tab::Tasks => "Tasks",
+            Tab::Todo => "Todo",
             Tab::Usage => "Usage",
             Tab::Brain => "Brain",
             Tab::Notes => "Notepad",
@@ -61,6 +65,7 @@ impl Tab {
             Tab::Sessions => "Ses",
             Tab::Prs => "PR",
             Tab::Tasks => "Tsk",
+            Tab::Todo => "Tdo",
             Tab::Usage => "Use",
             Tab::Brain => "Brn",
             Tab::Notes => "Not",
@@ -176,6 +181,10 @@ pub enum Outcome {
     Edit(PathBuf),
     /// One line for the events log.
     Log(String),
+    /// Show this session (by session id) on the Sessions tab, opened.
+    Session(String),
+    /// Start a new Claude session with this first prompt and open it.
+    Spawn(String),
 }
 
 pub trait View {
@@ -226,6 +235,7 @@ impl Tabs {
             .map(|&t| match t {
                 Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
                 Tab::Tasks => Box::new(tasks::TasksView::new()),
+                Tab::Todo => Box::new(todo::TodoView::new()),
                 Tab::Usage => Box::new(usage::UsageView::new()),
                 Tab::Brain => Box::new(notes::NotesView::brain()),
                 Tab::Notes => Box::new(notes::NotesView::notepad()),
