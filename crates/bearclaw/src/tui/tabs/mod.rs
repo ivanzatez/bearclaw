@@ -2,6 +2,7 @@
 //! and the pieces they share ([`loader`], [`pager`], [`input`]).
 
 pub mod brain;
+pub mod editor;
 pub mod input;
 pub mod loader;
 pub mod memos;

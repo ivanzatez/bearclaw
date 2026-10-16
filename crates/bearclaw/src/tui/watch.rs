@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -37,6 +37,7 @@ use crate::tui::dash::keys::{self, Action, RenameAction};
 use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
 use crate::tui::notify::notify;
+use crate::tui::tabs::editor::{Editor, EditorOutcome};
 use crate::tui::tabs::session::{DetailOutcome, SessionDetail};
 use crate::tui::tabs::{self, Outcome, Tab, Tabs};
 
@@ -246,27 +247,6 @@ fn run_quiet(interval_secs: u64, stuck_secs: i64) -> Result<()> {
 struct TermGuard {
     mouse: bool,
 }
-/// Hand the terminal to `$VISUAL` / `$EDITOR` for `path`, then take it back.
-fn suspend_edit(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    mouse: bool,
-    path: &Path,
-) -> Result<()> {
-    if mouse {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
-    }
-    execute!(io::stdout(), LeaveAlternateScreen, Show).map_err(Error::Io)?;
-    disable_raw_mode().map_err(Error::Io)?;
-    let edited = crate::cli::config_cmd::open_editor(path);
-    enable_raw_mode().map_err(Error::Io)?;
-    execute!(io::stdout(), EnterAlternateScreen).map_err(Error::Io)?;
-    if mouse {
-        execute!(io::stdout(), EnableMouseCapture).map_err(Error::Io)?;
-    }
-    terminal.clear().map_err(Error::Io)?;
-    edited
-}
-
 impl Drop for TermGuard {
     fn drop(&mut self) {
         if self.mouse {
@@ -330,6 +310,8 @@ struct Dash {
     tab_hits: Vec<(Tab, u16, u16)>,
     /// `Some` while one session is open up close (`d`), in place of the list.
     detail: Option<SessionDetail>,
+    /// `Some` while a file is open in the editor, over whichever tab asked for it.
+    editor: Option<Editor>,
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -757,6 +739,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         dormant: 0,
         tab_hits: Vec::new(),
         detail: None,
+        editor: None,
     };
     let mut tabs = Tabs::new();
     let mut naming = Naming::new(&loaded.cfg.naming);
@@ -909,6 +892,20 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             continue;
         }
 
+        // An open editor owns every key until it closes.
+        if let Some(ed) = dash.editor.as_mut() {
+            if let Event::Key(k) = ev
+                && k.kind != KeyEventKind::Release
+                && ed.key(k) == EditorOutcome::Closed
+            {
+                dash.editor = None;
+                // Whatever was edited is re-read when its tab shows again.
+                let active = tabs.active;
+                tabs.switch(active);
+            }
+            continue;
+        }
+
         // Tab / ⇧Tab and a tap on the bar switch tabs, unless a text input owns the keys.
         let detail_typing = dash.detail.as_ref().is_some_and(SessionDetail::typing);
         if !tabs.typing() && !detail_typing {
@@ -948,14 +945,13 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     log.insert(0, Ev::now("·", msg));
                     log.truncate(EVENT_CAP);
                 }
-                Outcome::Edit(path) => {
-                    if let Err(e) = suspend_edit(&mut terminal, mouse, &path) {
+                Outcome::Edit(path) => match Editor::open(path) {
+                    Ok(e) => dash.editor = Some(e),
+                    Err(e) => {
                         log.insert(0, Ev::now("✕", format!("editor: {e}")));
                         log.truncate(EVENT_CAP);
                     }
-                    // Whatever was edited is re-read when the tab shows again.
-                    tabs.switch(active);
-                }
+                },
             }
             continue;
         }
@@ -1141,6 +1137,11 @@ fn draw_app(
     dash.tab_hits = hits;
     if body.height == 0 {
         dash.list_area = Rect::default();
+        return;
+    }
+    if let Some(ed) = dash.editor.as_mut() {
+        dash.list_area = Rect::default();
+        ed.draw(f, body);
         return;
     }
     let active = tabs.active;
@@ -1670,6 +1671,7 @@ mod tests {
             dormant: 0,
             tab_hits: Vec::new(),
             detail: None,
+            editor: None,
         }
     }
 
