@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use chrono::NaiveDate;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -11,7 +11,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
 use super::loader::Loader;
-use super::pager::Pager;
 use super::{Outcome, View, common_key};
 use crate::cli::render::{column, fit};
 use crate::core::productive::{self, Grouping, Task};
@@ -25,7 +24,8 @@ pub struct TasksView {
     /// Position in [`TasksView::order`] — the tasks as listed, group by group.
     sel: usize,
     list: ListState,
-    pager: Option<Pager>,
+    /// How a task's link opens — swapped out in tests, which must not launch a browser.
+    pub(crate) opener: fn(&str) -> Result<(), String>,
 }
 
 impl Default for TasksView {
@@ -54,7 +54,7 @@ impl TasksView {
             grouping: Grouping::Status,
             sel: 0,
             list: ListState::default(),
-            pager: None,
+            opener: open_url,
         }
     }
 
@@ -116,25 +116,12 @@ impl TasksView {
         Line::from(spans)
     }
 
-    fn open(&mut self) {
-        let Some(t) = self.selected_task() else {
-            return;
-        };
-        let text = format!(
-            "{}\n\n#{} · {} · {}\nDue: {}\n{}\n\n{}",
-            t.title,
-            t.number,
-            t.project,
-            t.status,
-            t.due_date.as_deref().unwrap_or("—"),
-            t.url,
-            if t.description.is_empty() {
-                "(no description)"
-            } else {
-                &t.description
-            }
-        );
-        self.pager = Some(Pager::new(format!("#{} {}", t.number, t.title), text));
+    /// The task in Productive, in the browser.
+    fn open(&self) -> Outcome {
+        match self.selected_task().map(|t| (self.opener)(&t.url)) {
+            Some(Err(e)) => Outcome::Log(e),
+            _ => Outcome::None,
+        }
     }
 }
 
@@ -156,10 +143,6 @@ impl View for TasksView {
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
-        if let Some(p) = self.pager.as_mut() {
-            p.draw(f, area);
-            return;
-        }
         let mut title = format!(" Tasks · {} open ", self.tasks().len());
         if self.load.data.is_some()
             && let Some(e) = &self.load.error
@@ -174,7 +157,7 @@ impl View for TasksView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ⏎ read · o open · g group by status/project · r refresh · esc back ",
+                " ⏎ open in Productive · g group by status/project · r refresh · esc back ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
@@ -232,15 +215,6 @@ impl View for TasksView {
     }
 
     fn key(&mut self, k: KeyEvent) -> Outcome {
-        if let Some(p) = self.pager.as_mut() {
-            if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-                return Outcome::Quit;
-            }
-            if !p.key(k) {
-                self.pager = None;
-            }
-            return Outcome::None;
-        }
         if let Some(o) = common_key(k) {
             return o;
         }
@@ -257,14 +231,7 @@ impl View for TasksView {
                 };
                 self.sel = 0;
             }
-            KeyCode::Enter => self.open(),
-            KeyCode::Char('o') => {
-                if let Some(t) = self.selected_task()
-                    && let Err(e) = open_url(&t.url)
-                {
-                    return Outcome::Log(e);
-                }
-            }
+            KeyCode::Enter | KeyCode::Char('o') => return self.open(),
             _ => {}
         }
         Outcome::None
@@ -335,9 +302,17 @@ mod tests {
         assert!(p.contains("Api · 2") && p.contains("Web · 1"), "{p}");
     }
 
+    static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    fn record(url: &str) -> Result<(), String> {
+        OPENED.lock().unwrap().push(url.to_string());
+        Ok(())
+    }
+
     #[test]
-    fn enter_opens_the_task_and_esc_closes_it() {
+    fn enter_opens_the_task_in_the_browser() {
         let mut v = TasksView::new();
+        v.opener = record;
         v.load.data = Some(vec![Task {
             id: "7".into(),
             number: "12".into(),
@@ -345,7 +320,6 @@ mod tests {
             project: "Website".into(),
             status: "In progress".into(),
             due_date: Some("2000-01-02".into()),
-            description: "the details".into(),
             url: "https://app.example/tasks/7".into(),
             ..Default::default()
         }]);
@@ -355,16 +329,17 @@ mod tests {
             "{list}"
         );
         assert!(list.contains("02.01."), "{list}");
-        v.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let open = screen(&mut v, 100, 20);
-        assert!(
-            open.contains("the details") && open.contains("In progress"),
-            "{open}"
-        );
         assert_eq!(
-            v.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            v.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             Outcome::None
         );
+        assert!(
+            OPENED
+                .lock()
+                .unwrap()
+                .contains(&"https://app.example/tasks/7".to_string())
+        );
+        // No summary page: the list stays, and Esc leaves the tab.
         assert!(screen(&mut v, 100, 10).contains("#12"));
         assert_eq!(
             v.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
