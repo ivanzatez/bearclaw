@@ -11,6 +11,7 @@ pub mod harness;
 pub mod hosts;
 pub mod jobs;
 pub mod naming;
+pub mod productive;
 pub mod prs;
 pub mod repos;
 pub mod snapshot;

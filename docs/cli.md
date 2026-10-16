@@ -265,6 +265,12 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 | tab | keys |
 | --- | --- |
 | PRs | `bearclaw prs` grouped by column · ↑/↓ `j`/`k` move · Enter/`o` open in the browser |
+| Tasks | your open [Productive](https://productive.io) tasks, due date first (overdue red) · Enter read · `o` open in the browser |
+
+The Tasks tab reads `productive.organizationId` (required — `bearclaw config set productive.organizationId '"<id>"'`),
+`productive.tokenEnv` (the env var holding your API token, default `PRODUCTIVE_AUTH_TOKEN`), and
+optionally `productive.apiUrl` / `productive.appUrl`. Your person id comes from the token's
+membership in that organization.
 
 Run it in a tmux session named `bearclaw` and bind `prefix f` to `switch-client -t bearclaw` to jump back
 after focusing a session (see [setup.md](setup.md#4-tmux)).

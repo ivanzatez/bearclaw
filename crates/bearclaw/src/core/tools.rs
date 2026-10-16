@@ -165,6 +165,27 @@ pub fn short_hostname() -> String {
         .unwrap_or_else(|| "local".into())
 }
 
+/// Lowercase, runs of anything but letters and digits → one `-`, no `-` at the ends.
+pub fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars().flat_map(char::to_lowercase) {
+        if c.is_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+/// Split `curl -w "\n%{http_code}"` output into the body and the status (0 when missing).
+pub fn split_http_status(out: &str) -> (String, u16) {
+    match out.rsplit_once('\n') {
+        Some((body, code)) => (body.to_string(), code.trim().parse().unwrap_or(0)),
+        None => (out.to_string(), 0),
+    }
+}
+
 /// Open an `http(s)` link in the default browser (`open`, else `xdg-open`). Anything else is
 /// refused: these links come from APIs, and `open` would happily run a file.
 pub fn open_url(url: &str) -> Result<(), String> {
@@ -190,6 +211,20 @@ pub fn open_url(url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slugs_and_http_status() {
+        assert_eq!(slugify("Acme Ltd."), "acme-ltd");
+        assert_eq!(slugify("  Hello,  World!! "), "hello-world");
+        assert_eq!(slugify("Čvrsti 2 koraka"), "čvrsti-2-koraka");
+        assert_eq!(slugify("!!!"), "");
+        assert_eq!(
+            split_http_status("{\"a\":1}\n200"),
+            ("{\"a\":1}".to_string(), 200)
+        );
+        assert_eq!(split_http_status("\n000"), (String::new(), 0));
+        assert_eq!(split_http_status("garbage"), ("garbage".to_string(), 0));
+    }
 
     #[test]
     fn open_url_rejects_non_http() {
