@@ -46,18 +46,15 @@ never a real home directory, real config or live sessions.
 
 ## Git workflow
 
-- Commit and push straight to `main` as soon as a change works: no branches, no PRs. The user
-  tests every push right away in the desktop app.
-- The desktop app talks to the workstation's web server, which runs from its own checkout: a
-  push is live only after `scripts/deploy.sh` runs there (over ssh, from that checkout).
-- Deploy every push to **all** hosts in the bearclaw config, not just the one serving the desktop
-  app: each host runs its own web server and CLI, and a spawn or fix on one host may go
-  through another's. Run `ssh <host> '~/Code/project/scripts/deploy.sh'` for each (they can run
-  in parallel) and check that each one ends with "web server up".
+- This is a personal fork: `origin` is the fork, `upstream` the original project. Commit freely;
+  **push only when the user asks**. Larger changes go on a branch.
+- One machine, no deploy step: after a change, reinstall what changed —
+  `cargo install --path crates/bearclaw` for the CLI/dashboard, `bearclaw web build` for the UI.
 - Commit only your own files, because other sessions may have uncommitted work in the same tree.
-- If you hit a conflict because another session is changing the same thing (a rejected push, a
-  rebase conflict, overlapping edits), move your work into a git worktree. Rebase it onto `main`
-  there, then push.
+  If another session is changing the same thing, move your work into a git worktree.
+- Pulling upstream (`git fetch upstream && git merge upstream/main`): every `fleet` there is
+  `bearclaw` here (binary, crates, `FLEET_*` env vars, paths), so expect conflicts on the name —
+  resolve them to the bearclaw spelling.
 
 ## Rules
 

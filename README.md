@@ -1,6 +1,6 @@
 # bearclaw
 
-Supervise a bearclaw of Claude Code sessions across your machines — from a terminal or from your phone.
+Supervise your Claude Code sessions across your machines — from a terminal or from your phone.
 
 `bearclaw` is one Rust CLI plus a small web app (a zero-dependency Node server and a React PWA). It finds every live Claude Code
 session on a machine (in tmux panes or iTerm tabs), shows what each one is doing, and lets you
@@ -22,11 +22,11 @@ The setup it is built for:
 ```
   laptop                         phone                           workstation (always on)
  ┌──────────────────────┐      ┌──────────────────┐            ┌──────────────────────────────┐
- │ bearclaw <cmd>          │      │ browser / PWA    │            │ tmux server (24/7)           │
- │  ├─ local sessions   │      │  (bearclaw web UI)  │            │  ├─ job-a: claude            │
+ │ bearclaw <cmd>       │      │ browser / PWA    │            │ tmux server (24/7)           │
+ │  ├─ local sessions   │      │ bearclaw web UI  │            │  ├─ job-a: claude            │
  │  └─ -H workstation ──┼─ssh──┼──────────────────┼──────────▶ │  ├─ job-b: claude            │
- │                      │      │                  │   http     │  └─ bearclaw: bearclaw watch (TUI) │
- │ bearclaw web serve :7777│◀─────┼── http ──────────┼──────────▶ │ bearclaw web serve :7777        │
+ │                      │      │                  │   http     │  └─ bearclaw: bearclaw (TUI) │
+ │ bearclaw web serve   │◀─────┼── http ──────────┼──────────▶ │ bearclaw web serve :7777     │
  └──────────────────────┘ peer │                  │  (tailnet) └──────────────────────────────┘
             ▲                  └──────────────────┘                        ▲
             └─────────────── Tailscale (WireGuard mesh, private IPs) ──────┘
@@ -105,6 +105,22 @@ bearclaw new billing-fix -C ~/Code/project # attach to (or create) a tmux sessio
 bearclaw last                              # back to the previous tmux session
 bearclaw tmux stale                        # idle shells nothing is using
 ```
+
+## Dashboard
+
+`bearclaw` on a terminal opens the dashboard: tabs for **Sessions · PRs · Tasks · Usage · Brain ·
+Memos · Settings** (Tab / Shift-Tab, or tap the bar). Sessions is the live list; `d` opens one
+session up close (its screen, brief, and a line to send it a message). PRs and Usage are
+`bearclaw prs` / `bearclaw usage`; Tasks lists your open [Productive](https://productive.io)
+tasks; Memos reads voice memos from the web server. Keys per tab:
+[docs/cli.md → Dashboard keys](docs/cli.md#dashboard-keys-watch).
+
+## Brain
+
+A folder of markdown notes (`~/brain` by default) that every Claude Code session on the machine
+reads and writes. `bearclaw brain install` adds a SessionStart hook so each new session gets the
+brain's index and instructions to read relevant notes and write down what it learns; the Brain
+tab browses, searches and edits it. See [docs/cli.md → Brain](docs/cli.md#brain).
 
 ## Docs
 
