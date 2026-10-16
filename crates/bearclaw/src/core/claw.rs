@@ -63,9 +63,15 @@ You are not a work session: do not set a todo item or a sticky note for yourself
 
 /// How Claw starts: the configured launcher, minus a shell-wide `ANTHROPIC_MODEL` — Claw runs
 /// on Claude Code's own default (settings / account), whatever the work sessions are pinned to.
+/// `exec`, so the shell ends with Claude and a Claw that exits reads as ended, not as a bare
+/// shell pretending to be Claw.
 pub fn launcher(base: &str) -> String {
-    format!("env -u ANTHROPIC_MODEL {base}")
+    format!("exec env -u ANTHROPIC_MODEL {base}")
 }
+
+/// The tmux option that marks the `claw` session as ours (a session of yours that happens to be
+/// called `claw` is never taken over).
+pub const MARK: &str = "@bearclaw_claw";
 
 fn settings() -> serde_json::Value {
     serde_json::json!({
@@ -90,6 +96,12 @@ pub fn prepare(dir: &Path) -> Result<()> {
         &dir.join(".claude/settings.json"),
         &(serde_json::to_string_pretty(&settings())? + "\n"),
     )
+}
+
+/// The sessions minus Claw's: it is the Claw tab, not a work session — no list row, no
+/// "finished" notifications on every reply.
+pub fn without_claw(rows: Vec<Session>, dir: &Path) -> Vec<Session> {
+    rows.into_iter().filter(|s| !is_claw(s, dir)).collect()
 }
 
 /// Claw's own session: it runs in the workspace.
@@ -140,10 +152,24 @@ mod tests {
     #[test]
     fn claw_runs_on_claude_codes_own_default_model() {
         // A shell-wide ANTHROPIC_MODEL (set for work sessions) must not pick Claw's model.
+        // `exec`: when Claude exits, the shell goes with it and the session ends, so the
+        // dashboard sees a dead Claw and starts a new one.
         assert_eq!(
             launcher("claude --dangerously-skip-permissions"),
-            "env -u ANTHROPIC_MODEL claude --dangerously-skip-permissions"
+            "exec env -u ANTHROPIC_MODEL claude --dangerously-skip-permissions"
         );
+    }
+
+    #[test]
+    fn claw_is_left_out_of_the_rows() {
+        let ws = std::path::Path::new("/tmp/state/claw");
+        let at = |cwd: &str| crate::core::discovery::Session {
+            cwd: Some(cwd.into()),
+            ..Default::default()
+        };
+        let rows = without_claw(vec![at("/tmp/state/claw"), at("/tmp/work")], ws);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cwd.as_deref(), Some("/tmp/work"));
     }
 
     #[test]

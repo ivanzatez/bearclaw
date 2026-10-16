@@ -578,6 +578,27 @@ fn brain_hook_never_fails() {
         with.contains("How deploys work") && with.contains("bearclaw todo set"),
         "{with}"
     );
+
+    // Claw (its own workspace) operates the todo; it is not told to keep an item of its own.
+    let claw = env.path("claw");
+    let out = env
+        .cmd()
+        .env("HOME", env.dir.path())
+        .env("BEARCLAW_CLAW_DIR", &claw)
+        .args(["brain", "hook"])
+        .write_stdin(
+            serde_json::json!({"cwd": claw, "hook_event_name": "SessionStart"}).to_string(),
+        )
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(
+        ctx.contains("How deploys work") && !ctx.contains("bearclaw todo set"),
+        "{ctx}"
+    );
 }
 
 // `brain install` wires the hook into ~/.claude/settings.json without touching anything else,

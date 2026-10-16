@@ -46,7 +46,10 @@ fn hook() {
         context.push_str(&brain::hook_context(&root, &brain::list(&root), 100));
         context.push('\n');
     }
-    context.push_str(crate::core::todo::SESSION_CONTEXT);
+    // Claw operates the todo for everyone; it keeps no item of its own.
+    if !started_in(&crate::core::claw::dir()) {
+        context.push_str(crate::core::todo::SESSION_CONTEXT);
+    }
     let out = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
@@ -54,6 +57,25 @@ fn hook() {
         }
     });
     println!("{out}");
+}
+
+/// Whether the session the hook runs for started in `dir` (Claude Code passes its `cwd` as JSON
+/// on stdin; run by hand, there is none).
+fn started_in(dir: &Path) -> bool {
+    use std::io::{IsTerminal, Read};
+    if std::io::stdin().is_terminal() {
+        return false;
+    }
+    let mut input = String::new();
+    let _ = std::io::stdin().take(1 << 20).read_to_string(&mut input);
+    serde_json::from_str::<Value>(&input)
+        .ok()
+        .and_then(|v| {
+            v["cwd"]
+                .as_str()
+                .map(|c| Path::new(c.trim_end_matches('/')) == dir)
+        })
+        .unwrap_or(false)
 }
 
 fn install(uninstall: bool) -> Result<()> {

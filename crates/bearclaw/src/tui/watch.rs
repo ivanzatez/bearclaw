@@ -119,7 +119,7 @@ fn now_ms() -> i64 {
 
 /// One supervision pass: update `state`, fire notifications, return (rows, new events).
 fn tick(state: &mut State, stuck_secs: i64) -> (Vec<Session>, Vec<Ev>) {
-    let mut rows = discover();
+    let mut rows = crate::core::claw::without_claw(discover(), &crate::core::claw::dir());
     enrich_iterm_tabs(&mut rows);
     let mut evs = Vec::new();
     let time = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -816,8 +816,6 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         spawning: None,
     };
     let mut tabs = Tabs::new();
-    // Claw's own session never shows in the list: it is the Claw tab.
-    let claw_dir = crate::core::claw::dir();
     let mut naming = Naming::new(&loaded.cfg.naming);
     let sync_tmux = loaded.cfg.naming.sync_tmux();
     // A config that doesn't parse degrades to defaults in silence — say so once,
@@ -871,7 +869,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                             &mut renaming,
                             // Over an open terminal a rename buffer would be invisible and
                             // steal its keys: say it in the log instead.
-                            purpose == Purpose::Bulk || dash.term.is_some(),
+                            purpose == Purpose::Bulk
+                                || dash.term.is_some()
+                                || tabs.active != Tab::Sessions,
                         )
                     })
                 }
@@ -886,7 +886,6 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         if last_poll.map(|t| t.elapsed() >= interval).unwrap_or(true) {
             let (r, mut evs) = tick(&mut state, o.stuck_secs);
             rows = r;
-            rows.retain(|s| !crate::core::claw::is_claw(s, &claw_dir));
             evs.reverse(); // newest first when prepended
             for e in evs {
                 log.insert(0, e);
@@ -1344,7 +1343,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                                 &name,
                                 &rows,
                                 &mut renaming,
-                                bulk || dash.term.is_some(),
+                                bulk || dash.term.is_some() || tabs.active != Tab::Sessions,
                             ),
                         );
                     }
@@ -1436,40 +1435,65 @@ fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) ->
 
 /// Claw's tmux session: prepare its workspace, then reuse the running session or start one.
 fn start_claw() -> Receiver<std::result::Result<String, String>> {
-    use crate::core::claw;
     let (tx, rx) = channel();
     std::thread::spawn(move || {
-        let dir = claw::dir();
-        let result = claw::prepare(&dir)
-            .map_err(|e| e.to_string())
-            .and_then(|()| {
-                let running = crate::core::tools::tmux_cmd()
-                    .args(["has-session", "-t", &format!("={}", claw::SESSION)])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .is_ok_and(|s| s.success());
-                if running {
-                    return Ok(claw::SESSION.to_string());
-                }
-                use crate::core::harness::Harness;
-                backend::spawn_tagged(
-                    crate::core::discovery::Backend::Tmux,
-                    &dir.display().to_string(),
-                    backend::Prompt::None,
-                    None,
-                    Some(claw::SESSION),
-                    false,
-                    &claw::launcher(&Harness::Claude.command()),
-                    Harness::Claude,
-                    None,
-                )
-                .map_err(|e| e.to_string())
-                .map(|(_, ts)| ts.unwrap_or_else(|| claw::SESSION.to_string()))
-            });
-        let _ = tx.send(result);
+        let _ = tx.send(find_or_start_claw());
     });
     rx
+}
+
+/// Prepare Claw's workspace, then reuse its running session or start one. A `claw` session that
+/// isn't ours is left alone.
+fn find_or_start_claw() -> std::result::Result<String, String> {
+    use crate::core::claw;
+    use crate::core::harness::Harness;
+    let dir = claw::dir();
+    claw::prepare(&dir).map_err(|e| e.to_string())?;
+    let target = format!("={}:", claw::SESSION);
+    let tmux = |args: &[&str]| {
+        crate::core::tools::tmux_cmd()
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    if tmux(&["has-session", "-t", &format!("={}", claw::SESSION)]).is_some() {
+        // Ours: marked, or (started before the mark existed) running in the workspace.
+        let marked =
+            tmux(&["show-options", "-qv", "-t", &target, claw::MARK]).as_deref() == Some("1");
+        let here = tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "#{pane_current_path}",
+        ]);
+        if !marked && here.as_deref().map(std::path::Path::new) != Some(dir.as_path()) {
+            return Err(format!(
+                "a tmux session called `{}` exists and isn't Claw — rename it, then r",
+                claw::SESSION
+            ));
+        }
+        tmux(&["set-option", "-t", &target, claw::MARK, "1"]);
+        return Ok(claw::SESSION.to_string());
+    }
+    let (_, ts) = backend::spawn_tagged(
+        crate::core::discovery::Backend::Tmux,
+        &dir.display().to_string(),
+        backend::Prompt::None,
+        None,
+        Some(claw::SESSION),
+        false,
+        &claw::launcher(&Harness::Claude.command()),
+        Harness::Claude,
+        None,
+    )
+    .map_err(|e| e.to_string())?;
+    let ts = ts.unwrap_or_else(|| claw::SESSION.to_string());
+    tmux(&["set-option", "-t", &format!("={ts}:"), claw::MARK, "1"]);
+    Ok(ts)
 }
 
 /// An open terminal under a one-line header; returns where the screen went (for the wheel).
