@@ -1,19 +1,20 @@
-//! The Brain tab: browse, search, read and write the brain's notes.
+//! The Brain and Notepad tabs: a folder of notes to browse, filter, create, edit and delete.
+//! Brain holds `.md` notes every Claude session shares; Notepad is your own `.md`/`.txt`.
 
 use std::path::PathBuf;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 
 use super::input::{InputResult, LineInput};
-use super::pager::Pager;
 use super::{Outcome, View, common_key};
 use crate::cli::render::{ago, column, fit, width_of};
 use crate::core::brain::{self, Note};
+use crate::core::notes;
 use crate::core::tools::tildify;
 
 enum Asking {
@@ -21,8 +22,11 @@ enum Asking {
     NewNote,
 }
 
-pub struct BrainView {
-    /// `None` = follow `brain.root`, re-read on every show.
+pub struct NotesView {
+    name: &'static str,
+    exts: &'static [&'static str],
+    /// Where the folder is when not fixed: re-read on every show (config edits apply).
+    resolve: fn() -> PathBuf,
     fixed_root: Option<PathBuf>,
     root: PathBuf,
     notes: Vec<Note>,
@@ -30,44 +34,55 @@ pub struct BrainView {
     shown: Vec<usize>,
     query: String,
     input: Option<(Asking, LineInput)>,
+    /// A note waiting for `y` to be deleted.
+    confirm_delete: Option<usize>,
     sel: usize,
     list: ListState,
-    pager: Option<Pager>,
 }
 
-impl Default for BrainView {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BrainView {
-    pub fn new() -> Self {
-        Self::with_root(None)
+impl NotesView {
+    pub fn brain() -> Self {
+        Self::new("Brain", &["md"], brain::root, None)
     }
 
-    /// A brain at a fixed folder, whatever the config says.
-    pub fn at(root: PathBuf) -> Self {
-        Self::with_root(Some(root))
+    pub fn notepad() -> Self {
+        Self::new("Notepad", &["md", "txt"], notes::root, None)
     }
 
-    fn with_root(fixed_root: Option<PathBuf>) -> Self {
-        BrainView {
+    /// The brain at a fixed folder, whatever the config says.
+    pub fn brain_at(root: PathBuf) -> Self {
+        Self::new("Brain", &["md"], brain::root, Some(root))
+    }
+
+    pub fn notepad_at(root: PathBuf) -> Self {
+        Self::new("Notepad", &["md", "txt"], notes::root, Some(root))
+    }
+
+    fn new(
+        name: &'static str,
+        exts: &'static [&'static str],
+        resolve: fn() -> PathBuf,
+        fixed_root: Option<PathBuf>,
+    ) -> Self {
+        NotesView {
+            name,
+            exts,
+            resolve,
             root: fixed_root.clone().unwrap_or_default(),
             fixed_root,
             notes: Vec::new(),
             shown: Vec::new(),
             query: String::new(),
             input: None,
+            confirm_delete: None,
             sel: 0,
             list: ListState::default(),
-            pager: None,
         }
     }
 
     fn relist(&mut self) {
-        self.root = self.fixed_root.clone().unwrap_or_else(brain::root);
-        self.notes = brain::list(&self.root);
+        self.root = self.fixed_root.clone().unwrap_or_else(self.resolve);
+        self.notes = brain::list_with(&self.root, self.exts);
         self.refilter();
     }
 
@@ -78,6 +93,25 @@ impl BrainView {
 
     fn selected(&self) -> Option<&Note> {
         self.shown.get(self.sel).map(|&i| &self.notes[i])
+    }
+
+    /// A new note: markdown, or plain text when the Notepad title ends in `.txt`.
+    fn create(&mut self, title: &str) -> Outcome {
+        let title = title.trim();
+        let (title, ext) = match title.strip_suffix(".txt") {
+            Some(t) if self.exts.contains(&"txt") => (t, "txt"),
+            _ => (title, "md"),
+        };
+        match brain::create_ext(&self.root, title, ext) {
+            Ok(path) => {
+                self.relist();
+                if let Some(i) = self.shown.iter().position(|&i| self.notes[i].path == path) {
+                    self.sel = i;
+                }
+                Outcome::Edit(path)
+            }
+            Err(e) => Outcome::Log(format!("new note: {e}")),
+        }
     }
 
     fn input_key(&mut self, k: KeyEvent) -> Outcome {
@@ -109,19 +143,13 @@ impl BrainView {
                 if searching || text.trim().is_empty() {
                     return Outcome::None;
                 }
-                match brain::create(&self.root, &text) {
-                    Ok(path) => {
-                        self.relist();
-                        Outcome::Edit(path)
-                    }
-                    Err(e) => Outcome::Log(format!("new note: {e}")),
-                }
+                self.create(&text)
             }
         }
     }
 }
 
-impl View for BrainView {
+impl View for NotesView {
     fn on_show(&mut self) {
         self.relist();
     }
@@ -129,16 +157,13 @@ impl View for BrainView {
     fn tick(&mut self) {}
 
     fn typing(&self) -> bool {
-        self.input.is_some()
+        self.input.is_some() || self.confirm_delete.is_some()
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
-        if let Some(p) = self.pager.as_mut() {
-            p.draw(f, area);
-            return;
-        }
         let mut title = format!(
-            " Brain · {} · {} notes ",
+            " {} · {} · {} notes ",
+            self.name,
             tildify(&self.root.display().to_string()),
             self.notes.len()
         );
@@ -150,24 +175,39 @@ impl View for BrainView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ⏎ read · e edit · n new · / search · esc back ",
+                " ⏎/e edit · n new · / search · x delete · esc back ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let [body, prompt] = Layout::vertical([
-            Constraint::Min(0),
-            Constraint::Length(u16::from(self.input.is_some())),
-        ])
-        .areas(inner);
+        let asking = self.input.is_some() || self.confirm_delete.is_some();
+        let [body, prompt] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(u16::from(asking))])
+                .areas(inner);
         if let Some((_, input)) = &self.input {
             input.draw(f, prompt);
+        }
+        if let Some(i) = self.confirm_delete {
+            f.render_widget(
+                Paragraph::new(Line::styled(
+                    format!(" delete {}? y/n", self.notes[i].rel),
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )),
+                prompt,
+            );
         }
         if self.notes.is_empty() {
             let root = tildify(&self.root.display().to_string());
             f.render_widget(
                 Paragraph::new(format!(" no notes yet in {root}\n n to write one"))
                     .wrap(Wrap { trim: false }),
+                body,
+            );
+            return;
+        }
+        if self.shown.is_empty() {
+            f.render_widget(
+                Paragraph::new(format!(" nothing matches /{}", self.query)),
                 body,
             );
             return;
@@ -197,12 +237,13 @@ impl View for BrainView {
         if self.input.is_some() {
             return self.input_key(k);
         }
-        if let Some(p) = self.pager.as_mut() {
-            if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
-                return Outcome::Quit;
-            }
-            if !p.key(k) {
-                self.pager = None;
+        if let Some(i) = self.confirm_delete.take() {
+            if k.code == KeyCode::Char('y') {
+                let path = self.notes[i].path.clone();
+                if let Err(e) = std::fs::remove_file(&path) {
+                    return Outcome::Log(format!("delete: {e}"));
+                }
+                self.relist();
             }
             return Outcome::None;
         }
@@ -227,18 +268,17 @@ impl View for BrainView {
                 self.input = Some((Asking::Search, input));
             }
             KeyCode::Char('n') => {
-                self.input = Some((Asking::NewNote, LineInput::new("new note title")))
+                let hint = if self.exts.contains(&"txt") {
+                    "new note title (end in .txt for plain text)"
+                } else {
+                    "new note title"
+                };
+                self.input = Some((Asking::NewNote, LineInput::new(hint)));
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('x') => self.confirm_delete = self.shown.get(self.sel).copied(),
+            KeyCode::Enter | KeyCode::Char('e') => {
                 if let Some(n) = self.selected() {
                     return Outcome::Edit(n.path.clone());
-                }
-            }
-            KeyCode::Enter => {
-                if let Some(n) = self.selected() {
-                    let text =
-                        std::fs::read_to_string(&n.path).unwrap_or_else(|e| format!("({e})"));
-                    self.pager = Some(Pager::new(n.title.clone(), text));
                 }
             }
             _ => {}
@@ -258,7 +298,7 @@ mod tests {
         KeyEvent::new(c, KeyModifiers::NONE)
     }
 
-    fn screen(v: &mut BrainView, w: u16, h: u16) -> String {
+    fn screen(v: &mut NotesView, w: u16, h: u16) -> String {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
         t.draw(|f| v.draw(f, f.area())).unwrap();
         let buf = t.backend().buffer().clone();
@@ -273,7 +313,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("api.md"), "# Deploy api\nuses helm").unwrap();
         std::fs::write(d.path().join("web.md"), "# Deploy web\nuses vercel").unwrap();
-        let mut v = BrainView::at(d.path().to_path_buf());
+        let mut v = NotesView::brain_at(d.path().to_path_buf());
         v.on_show();
         let all = screen(&mut v, 80, 10);
         assert!(
@@ -308,9 +348,43 @@ mod tests {
     }
 
     #[test]
+    fn notepad_new_note_opens_the_editor() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = NotesView::notepad_at(d.path().to_path_buf());
+        v.on_show();
+        v.key(k(KeyCode::Char('n')));
+        for c in "Ideas.txt".chars() {
+            v.key(k(KeyCode::Char(c)));
+        }
+        let made = d.path().join("ideas.txt");
+        assert_eq!(v.key(k(KeyCode::Enter)), Outcome::Edit(made.clone()));
+        assert_eq!(std::fs::read_to_string(&made).unwrap(), "Ideas\n\n");
+        // Enter on a note opens it in the editor too.
+        assert_eq!(v.key(k(KeyCode::Enter)), Outcome::Edit(made));
+    }
+
+    #[test]
+    fn notepad_delete_needs_confirmation() {
+        let d = tempfile::tempdir().unwrap();
+        let note = d.path().join("todo.txt");
+        std::fs::write(&note, "todo\n").unwrap();
+        let mut v = NotesView::notepad_at(d.path().to_path_buf());
+        v.on_show();
+        v.key(k(KeyCode::Char('x')));
+        assert!(v.typing());
+        v.key(k(KeyCode::Char('n')));
+        assert!(!v.typing() && note.exists());
+        v.key(k(KeyCode::Char('x')));
+        v.key(k(KeyCode::Char('y')));
+        assert!(!note.exists());
+        let s = screen(&mut v, 80, 8);
+        assert!(s.contains("no notes yet"), "{s}");
+    }
+
+    #[test]
     fn an_empty_brain_says_how_to_start() {
         let d = tempfile::tempdir().unwrap();
-        let mut v = BrainView::at(d.path().join("nothing-here"));
+        let mut v = NotesView::brain_at(d.path().join("nothing-here"));
         v.on_show();
         let s = screen(&mut v, 90, 8);
         assert!(

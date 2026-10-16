@@ -12,6 +12,7 @@ pub mod harness;
 pub mod hosts;
 pub mod jobs;
 pub mod naming;
+pub mod notes;
 pub mod productive;
 pub mod prs;
 pub mod repos;

@@ -131,6 +131,17 @@ impl SettingsView {
                 "no — bearclaw brain install"
             }
         ));
+        let notepad = match raw["notes"]["root"].as_str().map(str::trim) {
+            Some(r) if !r.is_empty() => PathBuf::from(crate::core::tools::expand_tilde(r)),
+            _ => home.join("notes"),
+        };
+        line(String::new());
+        line("Notepad".into());
+        line(format!(
+            "  folder    {} ({} notes)",
+            notepad.display(),
+            brain::list_with(&notepad, &["md", "txt"]).len()
+        ));
         line(String::new());
         line("Productive".into());
         match productive::Settings::from_raw(raw) {

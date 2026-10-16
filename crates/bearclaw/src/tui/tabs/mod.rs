@@ -1,11 +1,10 @@
 //! The dashboard's tabs: the bar on row 0, the [`View`] every non-Sessions tab implements,
 //! and the pieces they share ([`loader`], [`pager`], [`input`]).
 
-pub mod brain;
 pub mod editor;
 pub mod input;
 pub mod loader;
-pub mod memos;
+pub mod notes;
 pub mod pager;
 pub mod prs;
 pub mod session;
@@ -30,7 +29,7 @@ pub enum Tab {
     Tasks,
     Usage,
     Brain,
-    Memos,
+    Notes,
     Settings,
 }
 
@@ -41,7 +40,7 @@ impl Tab {
         Tab::Tasks,
         Tab::Usage,
         Tab::Brain,
-        Tab::Memos,
+        Tab::Notes,
         Tab::Settings,
     ];
 
@@ -52,7 +51,7 @@ impl Tab {
             Tab::Tasks => "Tasks",
             Tab::Usage => "Usage",
             Tab::Brain => "Brain",
-            Tab::Memos => "Memos",
+            Tab::Notes => "Notepad",
             Tab::Settings => "Settings",
         }
     }
@@ -64,7 +63,7 @@ impl Tab {
             Tab::Tasks => "Tsk",
             Tab::Usage => "Use",
             Tab::Brain => "Brn",
-            Tab::Memos => "Mem",
+            Tab::Notes => "Not",
             Tab::Settings => "Set",
         }
     }
@@ -215,8 +214,8 @@ impl Tabs {
                 Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
                 Tab::Tasks => Box::new(tasks::TasksView::new()),
                 Tab::Usage => Box::new(usage::UsageView::new()),
-                Tab::Brain => Box::new(brain::BrainView::new()),
-                Tab::Memos => Box::new(memos::MemosView::new()),
+                Tab::Brain => Box::new(notes::NotesView::brain()),
+                Tab::Notes => Box::new(notes::NotesView::notepad()),
                 Tab::Settings => Box::new(settings::SettingsView::new()),
                 Tab::Sessions => unreachable!("Sessions is the dashboard itself"),
             })
@@ -294,7 +293,7 @@ mod tests {
             "{s}"
         );
         assert_eq!(hit(&hits, 0), Some(Tab::Usage));
-        assert_eq!(hit(&hits, width_of(&s) as u16 - 1), Some(Tab::Memos));
+        assert_eq!(hit(&hits, width_of(&s) as u16 - 1), Some(Tab::Notes));
 
         let (none, hits) = tab_bar(Tab::Sessions, 0, None);
         assert_eq!(width_of(&text(&none)), 0);

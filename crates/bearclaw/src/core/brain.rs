@@ -67,7 +67,16 @@ pub fn title_of(text: &str, stem: &str) -> String {
         .to_string()
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<Note>) {
+/// A `.txt` note's title: its first non-empty line, else `stem`.
+fn txt_title(text: &str, stem: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or(stem)
+        .to_string()
+}
+
+fn walk(root: &Path, dir: &Path, exts: &[&str], out: &mut Vec<Note>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -79,10 +88,13 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Note>) {
         let path = e.path();
         let Ok(meta) = e.metadata() else { continue };
         if meta.is_dir() {
-            walk(root, &path, out);
+            walk(root, &path, exts, out);
             continue;
         }
-        if !name.ends_with(".md") {
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if !exts.contains(&ext) {
             continue;
         }
         let rel = path
@@ -96,8 +108,15 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Note>) {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_millis() as i64);
+        let stem = path
+            .file_stem()
+            .map_or_else(String::new, |s| s.to_string_lossy().to_string());
         out.push(Note {
-            title: title_of(&text, name.trim_end_matches(".md")),
+            title: if ext == "md" {
+                title_of(&text, &stem)
+            } else {
+                txt_title(&text, &stem)
+            },
             path,
             rel,
             mtime_ms,
@@ -105,11 +124,16 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Note>) {
     }
 }
 
-/// Every `*.md` under `root` (dot-dirs and `node_modules` skipped), newest first. A missing
-/// root is an empty brain.
+/// Every `*.md` under `root`: see [`list_with`].
 pub fn list(root: &Path) -> Vec<Note> {
+    list_with(root, &["md"])
+}
+
+/// Every file with one of `exts` under `root` (dot-dirs and `node_modules` skipped), newest
+/// first. A missing root is an empty list.
+pub fn list_with(root: &Path, exts: &[&str]) -> Vec<Note> {
     let mut out = Vec::new();
-    walk(root, root, &mut out);
+    walk(root, root, exts, &mut out);
     out.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms).then_with(|| a.rel.cmp(&b.rel)));
     out
 }
@@ -267,8 +291,14 @@ pub fn uninstall_hook(settings: &mut Value) -> bool {
     true
 }
 
-/// A new note `<slug>.md` starting with `# title`; `-2`, `-3`… rather than overwrite anything.
+/// A new note `<slug>.md` starting with `# title`; see [`create_ext`].
 pub fn create(root: &Path, title: &str) -> std::io::Result<PathBuf> {
+    create_ext(root, title, "md")
+}
+
+/// A new note `<slug>.<ext>` starting with its title (`# title` for markdown); `-2`, `-3`…
+/// rather than overwrite anything.
+pub fn create_ext(root: &Path, title: &str, ext: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(root)?;
     let mut slug = slugify(title);
     if slug.is_empty() {
@@ -276,14 +306,15 @@ pub fn create(root: &Path, title: &str) -> std::io::Result<PathBuf> {
     }
     for n in 1.. {
         let name = if n == 1 {
-            format!("{slug}.md")
+            format!("{slug}.{ext}")
         } else {
-            format!("{slug}-{n}.md")
+            format!("{slug}-{n}.{ext}")
         };
         let path = root.join(name);
         match fs::File::options().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
-                f.write_all(format!("# {}\n\n", title.trim()).as_bytes())?;
+                let head = if ext == "md" { "# " } else { "" };
+                f.write_all(format!("{head}{}\n\n", title.trim()).as_bytes())?;
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -331,6 +362,23 @@ mod tests {
         assert_eq!(rels, ["sub/b.md", "a.md"]);
         assert_eq!(notes[0].title, "B");
         assert!(list(&d.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn txt_notes_take_their_first_line_as_title() {
+        let d = tempfile::tempdir().unwrap();
+        write(d.path(), "a.txt", "\n\nShopping list\n- milk", 2);
+        write(d.path(), "b.md", "# B", 1);
+        write(d.path(), "c.log", "ignored", 0);
+        let notes = list_with(d.path(), &["md", "txt"]);
+        let got: Vec<(&str, &str)> = notes
+            .iter()
+            .map(|n| (n.rel.as_str(), n.title.as_str()))
+            .collect();
+        assert_eq!(got, [("b.md", "B"), ("a.txt", "Shopping list")]);
+        assert_eq!(list(d.path()).len(), 1);
+        let t = create_ext(d.path(), "Ideas", "txt").unwrap();
+        assert_eq!(std::fs::read_to_string(&t).unwrap(), "Ideas\n\n");
     }
 
     #[test]

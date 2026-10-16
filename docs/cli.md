@@ -236,7 +236,7 @@ whose dormant list can't be fetched has nothing pruned that run.
 
 ### Dashboard keys (`watch`)
 
-The dashboard has tabs — **Sessions · PRs · Tasks · Usage · Brain · Memos · Settings** — on its
+The dashboard has tabs — **Sessions · PRs · Tasks · Usage · Brain · Notepad · Settings** — on its
 first row. Tab / Shift-Tab, Shift-→ / Shift-← (or a tap on the bar) switch them; on a narrow pane the bar shortens to
 `Ses PR Tsk …`, then to `‹ Active ›` whose arrows step to the neighbouring tab. The Sessions label
 carries `⏸N` while N sessions wait for you, so it shows from every tab. Session polling and
@@ -269,8 +269,8 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 | tab | keys |
 | --- | --- |
 | PRs | `bearclaw prs` grouped by column · ↑/↓ `j`/`k` move · Enter/`o` open in the browser |
-| Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter read · `e` edit · `n` new note (asks for a title) · Esc clears the filter, then leaves |
-| Memos | voice memos from the local web server (`GET /api/memos`; start it with `bearclaw web serve` or `web install-service` — the tab says so when it isn't up) · Enter reads a transcript |
+| Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
+| Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |
 | Settings | one page: config file, web server (and whether it answers), brain folder and hook, Productive org and token, spawn dirs, repos, PR scope · `e` edits the config, re-read on return |
 | Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
 | Tasks | your open [Productive](https://productive.io) tasks, due date first (overdue red) · Enter read · `o` open in the browser |
