@@ -38,6 +38,7 @@ use crate::tui::dash::keys::{self, Action, RenameAction};
 use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
 use crate::tui::notify::notify;
+use crate::tui::tabs::session::{DetailOutcome, SessionDetail};
 use crate::tui::tabs::{self, Outcome, Tab, Tabs};
 
 const EVENT_CAP: usize = 20;
@@ -328,6 +329,8 @@ struct Dash {
     dormant: usize,
     /// Each tab's columns on the bar (row 0), recorded on every draw for clicks.
     tab_hits: Vec<(Tab, u16, u16)>,
+    /// `Some` while one session is open up close (`d`), in place of the list.
+    detail: Option<SessionDetail>,
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -754,6 +757,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         tick: 0,
         dormant: 0,
         tab_hits: Vec::new(),
+        detail: None,
     };
     let mut tabs = Tabs::new();
     let mut naming = Naming::new(&loaded.cfg.naming);
@@ -841,6 +845,12 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         clamp_offset(&mut dash, rows.len());
 
         tabs.tick_all();
+        if let Some(d) = dash.detail.as_mut()
+            && let Some(msg) = d.tick(&rows)
+        {
+            log.insert(0, Ev::now("→", msg));
+            log.truncate(EVENT_CAP);
+        }
         terminal
             .draw(|f| {
                 draw_app(
@@ -901,7 +911,8 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         }
 
         // Tab / ⇧Tab and a tap on the bar switch tabs, unless a text input owns the keys.
-        if !tabs.typing() {
+        let detail_typing = dash.detail.as_ref().is_some_and(SessionDetail::typing);
+        if !tabs.typing() && !detail_typing {
             let to = match &ev {
                 Event::Key(k) if k.kind != KeyEventKind::Release => match k.code {
                     KeyCode::Tab => Some(tabs.active.next()),
@@ -946,6 +957,24 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             continue;
         }
 
+        // A session open up close owns the Sessions tab's keys until it closes.
+        if let Some(d) = dash.detail.as_mut() {
+            if let Event::Key(k) = ev
+                && k.kind != KeyEventKind::Release
+            {
+                match d.key(k, &rows) {
+                    DetailOutcome::None => {}
+                    DetailOutcome::Close => dash.detail = None,
+                    DetailOutcome::Quit => break,
+                    DetailOutcome::Log(msg) => {
+                        log.insert(0, Ev::now("·", msg));
+                        log.truncate(EVENT_CAP);
+                    }
+                }
+            }
+            continue;
+        }
+
         let action = match ev {
             Event::Key(k) if k.kind != KeyEventKind::Release => keys::action(k),
             Event::Mouse(m) => {
@@ -984,6 +1013,11 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 }
             }
             Action::ToggleHelp => dash.help = !dash.help,
+            Action::Detail => {
+                if let Some(r) = rows.get(sel) {
+                    dash.detail = Some(SessionDetail::open(r.key()));
+                }
+            }
             Action::ToggleEvents => dash.events = Some(!dash.events_shown),
             // A Tiny pane has no second line to give, so `plan` ignores the
             // override there — persisting it would strand the user in a mode they
@@ -1201,10 +1235,17 @@ fn draw_in(
     } else {
         render_header(f, chunks[0], rows, o, &plan, (naming, dash.dormant), tick);
     }
-    let ctx = BearclawCtx::of(rows, &plan);
-    render_sessions(f, chunks[1], rows, sel, &plan, &ctx, dash);
-    if events_height > 0 {
-        render_events(f, chunks[2], log, &plan);
+    if let Some(mut d) = dash.detail.take() {
+        d.draw(f, chunks[1].union(chunks[2]), rows);
+        dash.detail = Some(d);
+        // No rows on screen: a tap must not focus one.
+        dash.list_area = Rect::default();
+    } else {
+        let ctx = BearclawCtx::of(rows, &plan);
+        render_sessions(f, chunks[1], rows, sel, &plan, &ctx, dash);
+        if events_height > 0 {
+            render_events(f, chunks[2], log, &plan);
+        }
     }
     if dash.help {
         render_help(f);
@@ -1524,8 +1565,9 @@ fn render_events(f: &mut ratatui::Frame, area: Rect, log: &[Ev], plan: &Plan) {
 }
 
 fn render_help(f: &mut ratatui::Frame) {
-    const BINDS: [(&str, &str); 13] = [
+    const BINDS: [(&str, &str); 14] = [
         ("Tab ⇧Tab", "switch tab (or tap the bar)"),
+        ("d →", "open a session: screen, brief, send"),
         ("1-9 0", "jump to that row and focus it"),
         ("⏎ ␣ l o", "focus the selected session"),
         ("↑↓ jk", "move the selection"),
@@ -1624,6 +1666,7 @@ mod tests {
             tick: 0,
             dormant: 0,
             tab_hits: Vec::new(),
+            detail: None,
         }
     }
 

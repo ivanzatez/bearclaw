@@ -24,6 +24,8 @@ pub enum Action {
     JumpTo(usize),
     /// Start the rename buffer for the selected session.
     Rename,
+    /// Open the selected session up close: screen, brief, send.
+    Detail,
     ToggleHelp,
     /// 1-row ⇄ 2-row items.
     ToggleRows,
@@ -113,6 +115,7 @@ pub fn action(k: KeyEvent) -> Action {
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char('r') => Action::Refresh,
         KeyCode::Char('n') => Action::Rename,
+        KeyCode::Char('d') | KeyCode::Right => Action::Detail,
         KeyCode::Char('N') => Action::SuggestName,
         KeyCode::Char('?') => Action::ToggleHelp,
         KeyCode::Char('z') => Action::ToggleRows,
@@ -167,6 +170,12 @@ mod tests {
     }
     fn ctrl(c: char) -> Action {
         action(key(KeyCode::Char(c), KeyModifiers::CONTROL))
+    }
+
+    #[test]
+    fn d_and_right_open_detail() {
+        assert_eq!(bare(KeyCode::Char('d')), Action::Detail);
+        assert_eq!(bare(KeyCode::Right), Action::Detail);
     }
 
     #[test]

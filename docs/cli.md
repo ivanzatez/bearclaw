@@ -251,6 +251,7 @@ Sessions tab:
 | Enter, space, `l`, `o` (and Ctrl-J) | focus the selected session's pane/tab |
 | ↑/↓, `k`/`j`, scroll | move the selection |
 | click / tap | select + focus (`--no-mouse` to disable) |
+| `d`, → | open the selected session up close: its cwd, brief (summary + open todos) and the bottom of its screen (re-read every 2 s); there `s` sends it a line (Enter sends, Esc cancels), Enter/`o` focuses it, `r` re-reads, Esc/← goes back to the list |
 | `n` | rename the selected session |
 | `N` | prefill the rename with the row's generated title |
 | Ctrl-N | suggest names for every unnamed session |

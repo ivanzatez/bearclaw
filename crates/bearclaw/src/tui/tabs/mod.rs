@@ -7,6 +7,7 @@ pub mod loader;
 pub mod memos;
 pub mod pager;
 pub mod prs;
+pub mod session;
 pub mod settings;
 pub mod tasks;
 pub mod usage;
