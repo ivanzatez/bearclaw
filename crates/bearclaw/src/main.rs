@@ -6,7 +6,7 @@ use colored::Colorize;
 use bearclaw::cli::{
     brain as brain_cmd, brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init,
     jobs as jobs_cmd, mcp, prs as prs_cmd, repos as repos_cmd, restore, skill, stack as stack_cmds,
-    tmux as tmux_cmds, usage as usage_cmd, web,
+    tmux as tmux_cmds, todo as todo_cmd, usage as usage_cmd, web,
 };
 use bearclaw::core::config;
 use bearclaw::core::discovery::Backend;
@@ -489,6 +489,18 @@ enum Commands {
     Web {
         #[command(subcommand)]
         action: WebCmd,
+    },
+
+    /// The todo: one-line work items sessions keep current (list, add, set, claim, done, rm)
+    Todo {
+        #[command(subcommand)]
+        action: Option<todo_cmd::TodoAction>,
+    },
+
+    /// A session's sticky note: up to six bullets on what it's doing (set, show)
+    Sticky {
+        #[command(subcommand)]
+        action: todo_cmd::StickyAction,
     },
 
     /// The brain: notes every Claude session reads and writes (hook, install, path)
@@ -978,6 +990,9 @@ fn placement(c: &Commands) -> Placement {
         | Commands::Mcp { .. }
         // The hook runs inside a Claude session: never over ssh, whatever BEARCLAW_HOST says.
         | Commands::Brain { .. }
+        // Run by a session about itself: always here, found through the process tree.
+        | Commands::Todo { .. }
+        | Commands::Sticky { .. }
         | Commands::Probe => Placement::Here,
         _ => Placement::Dispatch(Scope::SelfHost),
     }
@@ -1507,6 +1522,8 @@ set one with: bearclaw config set hosts.{h}.ssh <alias>"
         },
         Commands::Skill { action } => skill::run(&action)?,
         Commands::Brain { action } => brain_cmd::run(&action)?,
+        Commands::Todo { action } => todo_cmd::run_todo(action)?,
+        Commands::Sticky { action } => todo_cmd::run_sticky(action)?,
         Commands::Mcp {
             http,
             bind,

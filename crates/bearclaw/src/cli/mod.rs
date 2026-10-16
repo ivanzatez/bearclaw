@@ -16,5 +16,6 @@ pub mod restore;
 pub mod skill;
 pub mod stack;
 pub mod tmux;
+pub mod todo;
 pub mod usage;
 pub mod web;
