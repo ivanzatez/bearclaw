@@ -54,6 +54,12 @@ impl Editor {
         self.dirty
     }
 
+    pub fn paste(&mut self, text: &str) {
+        if self.text.insert_str(text) {
+            self.dirty = true;
+        }
+    }
+
     pub fn save(&mut self) -> Result<(), String> {
         let mut body = self.text.lines().join("\n");
         if self.trailing_newline {
@@ -80,7 +86,7 @@ impl Editor {
         let name = tildify(&self.path.display().to_string());
         let mark = if self.dirty { " •" } else { "" };
         let hint = match &self.error {
-            Some(e) => format!(" ✕ {e} "),
+            Some(e) => format!(" ✕ {e} — esc again to close without saving "),
             None => " ctrl+s save · esc save & close ".into(),
         };
         self.text.set_block(
@@ -94,7 +100,8 @@ impl Editor {
         f.render_widget(&self.text, area);
     }
 
-    /// Esc and Ctrl+C save (when changed) and close: nothing typed is ever dropped silently.
+    /// Esc and Ctrl+C save (when changed) and close: nothing typed is dropped silently — a
+    /// failed save keeps the editor open, and only a second Esc closes without saving.
     pub fn key(&mut self, k: KeyEvent) -> EditorOutcome {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         match k.code {
@@ -116,9 +123,12 @@ impl Editor {
         if !self.dirty {
             return EditorOutcome::Closed;
         }
+        // The failure is already on screen: this Esc is a deliberate "throw it away".
+        let warned = self.error.is_some();
         match self.save() {
             Ok(()) => EditorOutcome::Closed,
-            // Stay open: closing now would throw the text away.
+            Err(_) if warned => EditorOutcome::Closed,
+            // Stay open the first time: closing now would throw the text away unasked.
             Err(_) => EditorOutcome::None,
         }
     }
@@ -144,6 +154,33 @@ mod tests {
         assert!(e.dirty());
         assert_eq!(e.key(k(KeyCode::Esc)), EditorOutcome::Closed);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "bca\n");
+    }
+
+    #[test]
+    fn a_paste_lands_in_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("n.md");
+        let mut e = Editor::open(p.clone()).unwrap();
+        e.paste("one\ntwo");
+        assert!(e.dirty());
+        assert_eq!(e.key(k(KeyCode::Esc)), EditorOutcome::Closed);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "one\ntwo");
+    }
+
+    #[test]
+    fn a_failed_save_can_still_be_left() {
+        // A read-only file opens fine and refuses every save.
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("ro.md");
+        std::fs::write(&p, "keep\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let mut e = Editor::open(p.clone()).unwrap();
+        e.key(k(KeyCode::Char('x')));
+        assert_eq!(e.key(k(KeyCode::Esc)), EditorOutcome::None);
+        // The error is on screen now; a second Esc discards and closes.
+        assert_eq!(e.key(k(KeyCode::Esc)), EditorOutcome::Closed);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "keep\n");
     }
 
     #[test]

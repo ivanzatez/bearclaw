@@ -49,8 +49,9 @@ A firstmate-style orchestrator for the many Claude Code sessions the user runs i
 
    | Key | Does |
    | --- | --- |
-   | `1`-`9`, `0` | jump straight to that row **and** focus it — one keypress, no Enter |
-   | ⏎, space, `l`, `o` | focus the selected session's tab/pane |
+   | `1`-`9`, `0` | jump straight to that row **and** open it — one keypress, no Enter |
+   | ⏎, space, `l`, `o` | open the selected session: a tmux one inside the dashboard (Ctrl+L, Ctrl+] or a tap on its header goes back), an iTerm one gets its tab focused |
+   | `c` | start a new Claude session in tmux (asks for the directory) and open it inside |
    | ↑/↓, `k`/`j` | move the selection |
    | tap / click | select + focus (mouse capture is on by default; `--no-mouse` or config `tui.mouse = false` turns it off) |
    | scroll wheel | move the selection |

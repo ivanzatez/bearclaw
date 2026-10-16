@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, ratatui 0.29, crossterm 0.28, tui-textarea 0.7, vt100 0.15, portable-pty 0.9 (vt100 0.16 conflicts with ratatui 0.29's unicode-width pin).
 
-**Spec:** this conversation, recorded here — user decisions: sessions live only in tmux and are used only through bearclaw, one session full-screen at a time, new sessions start like `cc yolo` (`claude --dangerously-skip-permissions`) through the user's shell, default directory `~/Desktop/projects/work`; PRs look like tb-pr's kanban; Notepad = own text files edited inside bearclaw, replacing Memos. Builder calls (user said "just do it"): leave key `Ctrl+]` (Esc belongs to Claude: interrupt/rewind), `c` = new session.
+**Spec:** this conversation, recorded here — user decisions: sessions live only in tmux and are used only through bearclaw, one session full-screen at a time, new sessions start with the user's usual Claude flags (the `claude` config value) through their shell, in a default directory from `spawnDirs`; PRs look like tb-pr's kanban; Notepad = own text files edited inside bearclaw, replacing Memos. Builder calls (user said "just do it"): leave key `Ctrl+]` (Esc belongs to Claude: interrupt/rewind), `c` = new session.
 
 ## Global Constraints
 
@@ -78,4 +78,4 @@
 
 ### Task 7: Local setup
 
-- [ ] User config (not committed): `claude` = `claude --dangerously-skip-permissions`; `spawnDirs` first entry = `~/Desktop/projects/work` for this host; reinstall the binary; live smoke test in a throwaway tmux session.
+- [ ] User config (not committed): `claude` = `claude --dangerously-skip-permissions`; `spawnDirs` first entry = the user's usual project directory for this host; reinstall the binary; live smoke test in a throwaway tmux session.

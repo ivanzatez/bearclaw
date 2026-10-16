@@ -163,7 +163,7 @@ pub enum Outcome {
     Quit,
     /// Back to the Sessions tab.
     Home,
-    /// Suspend the dashboard and open this file in `$VISUAL` / `$EDITOR`.
+    /// Open this file in the built-in editor over the dashboard.
     Edit(PathBuf),
     /// One line for the events log.
     Log(String),
@@ -176,6 +176,8 @@ pub trait View {
     fn tick(&mut self);
     fn draw(&mut self, f: &mut Frame, area: Rect);
     fn key(&mut self, k: KeyEvent) -> Outcome;
+    /// Pasted text, for a view with a text input open; dropped otherwise.
+    fn paste(&mut self, _text: &str) {}
     /// A text input is open: every key is its, Tab and `q` included.
     fn typing(&self) -> bool {
         false

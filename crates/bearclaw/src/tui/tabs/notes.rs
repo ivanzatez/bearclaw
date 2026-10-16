@@ -160,6 +160,18 @@ impl View for NotesView {
         self.input.is_some() || self.confirm_delete.is_some()
     }
 
+    fn paste(&mut self, text: &str) {
+        let Some((asking, input)) = self.input.as_mut() else {
+            return;
+        };
+        input.paste(text);
+        if matches!(asking, Asking::Search) {
+            self.query = input.buf.clone();
+            self.sel = 0;
+            self.refilter();
+        }
+    }
+
     fn draw(&mut self, f: &mut Frame, area: Rect) {
         let mut title = format!(
             " {} · {} · {} notes ",
@@ -379,6 +391,19 @@ mod tests {
         assert!(!note.exists());
         let s = screen(&mut v, 80, 8);
         assert!(s.contains("no notes yet"), "{s}");
+    }
+
+    #[test]
+    fn a_paste_goes_into_the_open_prompt() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("api.md"), "# Deploy api\nuses helm").unwrap();
+        std::fs::write(d.path().join("web.md"), "# Deploy web").unwrap();
+        let mut v = NotesView::brain_at(d.path().to_path_buf());
+        v.on_show();
+        v.key(k(KeyCode::Char('/')));
+        v.paste("helm");
+        let s = screen(&mut v, 80, 10);
+        assert!(s.contains("Deploy api") && !s.contains("Deploy web"), "{s}");
     }
 
     #[test]

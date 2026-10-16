@@ -92,9 +92,10 @@ pub fn wheel(up: bool, col: u16, row: u16) -> Vec<u8> {
     format!("\x1b[<{button};{};{}M", col + 1, row + 1).into_bytes()
 }
 
-/// Ctrl+] — the one key the embedded terminal keeps for itself: back to the dashboard.
+/// Ctrl+L (or Ctrl+], which some keyboards can't type) — the keys the embedded terminal keeps
+/// for itself: back to the dashboard. The program inside never sees them.
 pub fn is_leave(k: KeyEvent) -> bool {
-    k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char(']' | '5'))
+    k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l' | ']' | '5'))
 }
 
 #[cfg(test)]
@@ -148,7 +149,9 @@ mod tests {
     }
 
     #[test]
-    fn leave_is_ctrl_right_bracket() {
+    fn leave_is_ctrl_l_or_ctrl_right_bracket() {
+        assert!(is_leave(KeyEvent::new(C::Char('l'), M::CONTROL)));
+        assert!(!is_leave(KeyEvent::new(C::Char('l'), M::NONE)));
         assert!(is_leave(KeyEvent::new(C::Char(']'), M::CONTROL)));
         // 0x1d arrives as Ctrl-5 in crossterm's legacy decoding.
         assert!(is_leave(KeyEvent::new(C::Char('5'), M::CONTROL)));

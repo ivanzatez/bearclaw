@@ -93,6 +93,12 @@ impl SessionDetail {
         self.input.is_some()
     }
 
+    pub fn paste(&mut self, text: &str) {
+        if let Some(input) = self.input.as_mut() {
+            input.paste(text);
+        }
+    }
+
     /// Re-peek on schedule and collect a finished send. Returns a line for the events log.
     pub fn tick(&mut self, rows: &[Session]) -> Option<String> {
         self.peek.poll();

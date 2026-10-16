@@ -253,7 +253,7 @@ Sessions tab:
 | key | does |
 | --- | --- |
 | `1`–`9`, `0` | jump to that row and open it |
-| Enter, space, `l`, `o` (and Ctrl-J) | open the selected session: a **tmux** session opens *inside* the dashboard (a real terminal under the tab bar — every key, paste and wheel scroll goes to it; **Ctrl+]** comes back to the list, the session keeps running); an iTerm session gets its tab focused |
+| Enter, space, `l`, `o` (and Ctrl-J) | open the selected session: a **tmux** session opens *inside* the dashboard (a real terminal under the tab bar — every key, paste and wheel scroll goes to it; **Ctrl+L** (or Ctrl+], or a tap on the header line / the Sessions tab) comes back to the list, the session keeps running — Ctrl+L therefore never reaches the program inside); an iTerm session gets its tab focused |
 | `c` | start a new Claude session in tmux — asks for the directory (prefilled with this host's first `spawnDirs` entry, else the current one), launches the configured `claude` command there and opens it inside |
 | ↑/↓, `k`/`j`, scroll | move the selection |
 | click / tap | select + focus (`--no-mouse` to disable) |

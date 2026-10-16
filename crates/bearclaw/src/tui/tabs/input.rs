@@ -48,6 +48,12 @@ impl LineInput {
         }
     }
 
+    /// Pasted text, lines joined with spaces: this is a one-line input.
+    pub fn paste(&mut self, text: &str) {
+        self.buf
+            .push_str(&text.lines().collect::<Vec<_>>().join(" "));
+    }
+
     pub fn draw(&self, f: &mut Frame, area: Rect) {
         let line = Line::from(vec![
             Span::styled(
@@ -70,6 +76,14 @@ mod tests {
 
     fn k(c: KeyCode) -> KeyEvent {
         KeyEvent::new(c, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn a_paste_is_one_line_of_text() {
+        let mut i = LineInput::new("dir");
+        i.buf.push_str("~/");
+        i.paste("Code/\nproject\r\n");
+        assert_eq!(i.buf, "~/Code/ project");
     }
 
     #[test]

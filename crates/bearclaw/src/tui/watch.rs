@@ -817,7 +817,15 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     naming.titles.insert(key.clone(), name.clone());
                     purpose.is_interactive().then(|| {
                         naming.suggestions.insert(key.clone(), name.clone());
-                        offer(&key, &name, &rows, &mut renaming, purpose == Purpose::Bulk)
+                        offer(
+                            &key,
+                            &name,
+                            &rows,
+                            &mut renaming,
+                            // Over an open terminal a rename buffer would be invisible and
+                            // steal its keys: say it in the log instead.
+                            purpose == Purpose::Bulk || dash.term.is_some(),
+                        )
                     })
                 }
             };
@@ -915,6 +923,12 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             if let Event::Resize(_, _) = ev {
                 clamp_offset(&mut dash, rows.len());
             }
+            if let Event::Paste(text) = &ev
+                && let Some(r) = renaming.as_mut()
+            {
+                r.buf.push_str(&text.lines().collect::<Vec<_>>().join(" "));
+                continue;
+            }
             match rename_event(&ev) {
                 RenameAction::None => {}
                 RenameAction::Insert(c) => {
@@ -948,7 +962,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
 
         // An open editor owns every key until it closes.
         if let Some(ed) = dash.editor.as_mut() {
-            if let Event::Key(k) = ev
+            if let Event::Paste(text) = &ev {
+                ed.paste(text);
+            } else if let Event::Key(k) = ev
                 && k.kind != KeyEventKind::Release
                 && ed.key(k) == EditorOutcome::Closed
             {
@@ -983,19 +999,20 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                             m.row.saturating_sub(a.y),
                         ));
                     }
-                    MouseEventKind::Down(MouseButton::Left) if m.row == 0 => {
-                        if let Some(to) = tabs::hit(&dash.tab_hits, m.column) {
-                            tabs.switch(to);
-                        }
-                    }
-                    _ => {}
+                    _ => match term_click(*m, dash.term_area, &dash.tab_hits) {
+                        TermClick::Leave => dash.term = None,
+                        TermClick::Switch(to) => tabs.switch(to),
+                        TermClick::None => {}
+                    },
                 },
                 _ => {}
             }
             continue;
         }
         if let Some(input) = dash.new_session.as_mut() {
-            if let Event::Key(k) = ev
+            if let Event::Paste(text) = &ev {
+                input.paste(text);
+            } else if let Event::Key(k) = ev
                 && k.kind != KeyEventKind::Release
             {
                 match input.key(k) {
@@ -1043,6 +1060,10 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         if let Some(view) = tabs.view(active) {
             let outcome = match ev {
                 Event::Key(k) if k.kind != KeyEventKind::Release => view.key(k),
+                Event::Paste(text) => {
+                    view.paste(&text);
+                    Outcome::None
+                }
                 _ => Outcome::None,
             };
             match outcome {
@@ -1066,7 +1087,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
 
         // A session open up close owns the Sessions tab's keys until it closes.
         if let Some(d) = dash.detail.as_mut() {
-            if let Event::Key(k) = ev
+            if let Event::Paste(text) = &ev {
+                d.paste(text);
+            } else if let Event::Key(k) = ev
                 && k.kind != KeyEventKind::Release
             {
                 match d.key(k, &rows) {
@@ -1184,7 +1207,16 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 // offer it straight away instead of paying for it twice.
                 for key in ready {
                     if let Some(name) = naming.suggestions.get(&key).cloned() {
-                        log.insert(0, offer(&key, &name, &rows, &mut renaming, bulk));
+                        log.insert(
+                            0,
+                            offer(
+                                &key,
+                                &name,
+                                &rows,
+                                &mut renaming,
+                                bulk || dash.term.is_some(),
+                            ),
+                        );
                     }
                 }
                 log.truncate(EVENT_CAP);
@@ -1226,6 +1258,37 @@ fn clamp_offset(dash: &mut Dash, len: usize) {
 }
 
 // --- drawing -----------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TermClick {
+    None,
+    Leave,
+    Switch(Tab),
+}
+
+/// A tap while a terminal is open: on its header row (just above `screen`) or on the Sessions
+/// label it means "back to the list" — the way out on a phone; another tab switches to it.
+/// Taps inside the screen belong to the session.
+fn term_click(
+    m: crossterm::event::MouseEvent,
+    screen: Rect,
+    hits: &[(Tab, u16, u16)],
+) -> TermClick {
+    if m.kind != MouseEventKind::Down(MouseButton::Left) {
+        return TermClick::None;
+    }
+    if m.row + 1 == screen.y {
+        return TermClick::Leave;
+    }
+    if m.row == 0 {
+        return match tabs::hit(hits, m.column) {
+            Some(Tab::Sessions) => TermClick::Leave,
+            Some(t) => TermClick::Switch(t),
+            None => TermClick::None,
+        };
+    }
+    TermClick::None
+}
 
 /// Enter on a session: one in tmux opens inside the dashboard; anything else (iTerm, or a
 /// tmux session that won't attach) gets its own terminal focused, as before.
@@ -1339,7 +1402,7 @@ fn draw_app(
         let [head, screen] =
             Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
         let status = if t.embed.alive() {
-            format!(" ⧉ {} · ctrl+] back to the list ", t.session)
+            format!(" ⧉ {} · ctrl+l (or tap here) back to the list ", t.session)
         } else {
             format!(" ⧉ {} · the session ended — any key to go back ", t.session)
         };
@@ -1789,7 +1852,7 @@ fn render_help(f: &mut ratatui::Frame) {
         ("d →", "open a session: screen, brief, send"),
         ("1-9 0", "jump to that row and focus it"),
         ("⏎ ␣ l o", "open it (tmux: inside here)"),
-        ("ctrl+]", "back from an open session"),
+        ("ctrl+l", "back from an open session"),
         ("c", "start a new session"),
         ("↑↓ jk", "move the selection"),
         ("tap", "select + focus (mouse/touch)"),
@@ -2025,10 +2088,33 @@ mod tests {
     }
 
     #[test]
+    fn taps_leave_an_open_terminal() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let (_, hits) = tabs::tab_bar(Tab::Sessions, 120, None);
+        let tap = |column, row| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let screen = Rect::new(0, 2, 120, 20);
+        // The header row above the screen, and the Sessions label itself, both leave.
+        assert_eq!(term_click(tap(30, 1), screen, &hits), TermClick::Leave);
+        assert_eq!(term_click(tap(2, 0), screen, &hits), TermClick::Leave);
+        let &(_, x0, _) = hits.iter().find(|h| h.0 == Tab::Prs).unwrap();
+        assert_eq!(
+            term_click(tap(x0 + 1, 0), screen, &hits),
+            TermClick::Switch(Tab::Prs)
+        );
+        // Inside the screen a tap belongs to the session.
+        assert_eq!(term_click(tap(10, 5), screen, &hits), TermClick::None);
+    }
+
+    #[test]
     fn embedded_terminal_fills_the_body() {
         // Still running when drawn: the header offers the way back, not "ended".
         let mut cmd = portable_pty::CommandBuilder::new("sh");
-        cmd.args(["-c", "printf 'hello from pty'; sleep 5"]);
+        cmd.args(["-c", "printf 'hello from pty'; exec sleep 5"]);
         let mut embed = Embedded::attach_cmd(cmd, 10, 60).unwrap();
         let until = Instant::now() + Duration::from_secs(5);
         while !embed.parser.screen().contents().contains("hello from pty") && Instant::now() < until
@@ -2046,7 +2132,7 @@ mod tests {
         let s = app_screen_with(120, 20, &mut tabs, &rows, &mut dash);
         assert!(s[0].contains("Sessions"), "{:?}", s[0]);
         assert!(
-            s[1].contains("demo") && s[1].contains("ctrl+]"),
+            s[1].contains("demo") && s[1].contains("ctrl+l"),
             "{:?}",
             s[1]
         );
