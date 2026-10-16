@@ -2,4 +2,5 @@
 
 pub mod dash;
 pub mod notify;
+pub mod tabs;
 pub mod watch;

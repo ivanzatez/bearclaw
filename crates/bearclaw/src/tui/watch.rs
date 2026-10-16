@@ -7,12 +7,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+    MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -35,6 +38,7 @@ use crate::tui::dash::keys::{self, Action, RenameAction};
 use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
 use crate::tui::notify::notify;
+use crate::tui::tabs::{self, Outcome, Tab, Tabs};
 
 const EVENT_CAP: usize = 20;
 
@@ -242,6 +246,27 @@ fn run_quiet(interval_secs: u64, stuck_secs: i64) -> Result<()> {
 struct TermGuard {
     mouse: bool,
 }
+/// Hand the terminal to `$VISUAL` / `$EDITOR` for `path`, then take it back.
+fn suspend_edit(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    mouse: bool,
+    path: &Path,
+) -> Result<()> {
+    if mouse {
+        let _ = execute!(io::stdout(), DisableMouseCapture);
+    }
+    execute!(io::stdout(), LeaveAlternateScreen, Show).map_err(Error::Io)?;
+    disable_raw_mode().map_err(Error::Io)?;
+    let edited = crate::cli::config_cmd::open_editor(path);
+    enable_raw_mode().map_err(Error::Io)?;
+    execute!(io::stdout(), EnterAlternateScreen).map_err(Error::Io)?;
+    if mouse {
+        execute!(io::stdout(), EnableMouseCapture).map_err(Error::Io)?;
+    }
+    terminal.clear().map_err(Error::Io)?;
+    edited
+}
+
 impl Drop for TermGuard {
     fn drop(&mut self) {
         if self.mouse {
@@ -301,6 +326,8 @@ struct Dash {
     tick: u64,
     /// Sessions a reboot left dormant on this machine (`bearclaw restore`), re-read every poll.
     dormant: usize,
+    /// Each tab's columns on the bar (row 0), recorded on every draw for clicks.
+    tab_hits: Vec<(Tab, u16, u16)>,
 }
 
 /// An open rename buffer, pinned to the session it was started on.
@@ -726,7 +753,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         naming: None,
         tick: 0,
         dormant: 0,
+        tab_hits: Vec::new(),
     };
+    let mut tabs = Tabs::new();
     let mut naming = Naming::new(&loaded.cfg.naming);
     let sync_tmux = loaded.cfg.naming.sync_tmux();
     // A config that doesn't parse degrades to defaults in silence — say so once,
@@ -811,8 +840,20 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         // ListState::offset survives a shrinking list and can point past the end.
         clamp_offset(&mut dash, rows.len());
 
+        tabs.tick_all();
         terminal
-            .draw(|f| draw(f, &rows, &log, sel, renaming.as_ref(), &o, &mut dash))
+            .draw(|f| {
+                draw_app(
+                    f,
+                    &mut tabs,
+                    &rows,
+                    &log,
+                    sel,
+                    renaming.as_ref(),
+                    &o,
+                    &mut dash,
+                )
+            })
             .map_err(Error::Io)?;
 
         if !event::poll(Duration::from_millis(250)).map_err(Error::Io)? {
@@ -854,6 +895,52 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         // Claude writes the new name on its next status update.
                         last_poll = Some(poll_again_in(interval, Duration::from_secs(2)));
                     }
+                }
+            }
+            continue;
+        }
+
+        // Tab / ⇧Tab and a tap on the bar switch tabs, unless a text input owns the keys.
+        if !tabs.typing() {
+            let to = match &ev {
+                Event::Key(k) if k.kind != KeyEventKind::Release => match k.code {
+                    KeyCode::Tab => Some(tabs.active.next()),
+                    KeyCode::BackTab => Some(tabs.active.prev()),
+                    _ => None,
+                },
+                Event::Mouse(m)
+                    if m.kind == MouseEventKind::Down(MouseButton::Left) && m.row == 0 =>
+                {
+                    tabs::hit(&dash.tab_hits, m.column)
+                }
+                _ => None,
+            };
+            if let Some(t) = to {
+                tabs.switch(t);
+                continue;
+            }
+        }
+        let active = tabs.active;
+        if let Some(view) = tabs.view(active) {
+            let outcome = match ev {
+                Event::Key(k) if k.kind != KeyEventKind::Release => view.key(k),
+                _ => Outcome::None,
+            };
+            match outcome {
+                Outcome::None => {}
+                Outcome::Quit => break,
+                Outcome::Home => tabs.switch(Tab::Sessions),
+                Outcome::Log(msg) => {
+                    log.insert(0, Ev::now("·", msg));
+                    log.truncate(EVENT_CAP);
+                }
+                Outcome::Edit(path) => {
+                    if let Err(e) = suspend_edit(&mut terminal, mouse, &path) {
+                        log.insert(0, Ev::now("✕", format!("editor: {e}")));
+                        log.truncate(EVENT_CAP);
+                    }
+                    // Whatever was edited is re-read when the tab shows again.
+                    tabs.switch(active);
                 }
             }
             continue;
@@ -997,6 +1084,41 @@ fn clamp_offset(dash: &mut Dash, len: usize) {
 
 // --- drawing -----------------------------------------------------------------
 
+/// Row 0 is the tab bar; the rest is the Sessions dashboard or the active tab's view.
+#[allow(clippy::too_many_arguments)]
+fn draw_app(
+    f: &mut ratatui::Frame,
+    tabs: &mut Tabs,
+    rows: &[Session],
+    log: &[Ev],
+    sel: usize,
+    renaming: Option<&Rename>,
+    o: &WatchOpts,
+    dash: &mut Dash,
+) {
+    let [bar, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(f.area());
+    let waiting = rows.iter().filter(|r| r.is_waiting()).count();
+    let badge = (waiting > 0).then(|| format!("⏸{waiting}"));
+    let (line, hits) = tabs::tab_bar(tabs.active, bar.width, badge);
+    f.render_widget(Paragraph::new(line), bar);
+    dash.tab_hits = hits;
+    if body.height == 0 {
+        dash.list_area = Rect::default();
+        return;
+    }
+    let active = tabs.active;
+    match tabs.view(active) {
+        Some(v) => {
+            // No session rows on screen: a tap must not reach one.
+            dash.list_area = Rect::default();
+            v.draw(f, body);
+        }
+        None => draw_in(f, body, rows, log, sel, renaming, o, dash),
+    }
+}
+
+/// The Sessions dashboard filling the whole frame — what the golden tests render.
+#[cfg(test)]
 fn draw(
     f: &mut ratatui::Frame,
     rows: &[Session],
@@ -1007,6 +1129,20 @@ fn draw(
     dash: &mut Dash,
 ) {
     let area = f.area();
+    draw_in(f, area, rows, log, sel, renaming, o, dash);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_in(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    rows: &[Session],
+    log: &[Ev],
+    sel: usize,
+    renaming: Option<&Rename>,
+    o: &WatchOpts,
+    dash: &mut Dash,
+) {
     dash.tick = dash.tick.wrapping_add(1);
     let naming = dash.naming;
     let tick = dash.tick;
@@ -1388,7 +1524,8 @@ fn render_events(f: &mut ratatui::Frame, area: Rect, log: &[Ev], plan: &Plan) {
 }
 
 fn render_help(f: &mut ratatui::Frame) {
-    const BINDS: [(&str, &str); 12] = [
+    const BINDS: [(&str, &str); 13] = [
+        ("Tab ⇧Tab", "switch tab (or tap the bar)"),
         ("1-9 0", "jump to that row and focus it"),
         ("⏎ ␣ l o", "focus the selected session"),
         ("↑↓ jk", "move the selection"),
@@ -1486,6 +1623,7 @@ mod tests {
             naming: None,
             tick: 0,
             dormant: 0,
+            tab_hits: Vec::new(),
         }
     }
 
@@ -1590,6 +1728,42 @@ mod tests {
         let long = [at(&deep), at(&deep)];
         assert_eq!(title(40, &long), " Sessions ");
         assert!(title(170, &long).contains("branches"));
+    }
+
+    fn app_screen(w: u16, h: u16, tabs: &mut Tabs, rows: &[Session]) -> Vec<String> {
+        let o = WatchOpts {
+            interval_secs: 5,
+            stuck_secs: 300,
+            ..Default::default()
+        };
+        let mut dash = test_dash();
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| draw_app(f, tabs, rows, &[], 0, None, &o, &mut dash))
+            .unwrap();
+        let buf = t.backend().buffer().clone();
+        (0..h)
+            .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect()
+    }
+
+    #[test]
+    fn golden_tab_bar_on_top() {
+        let rows = fixture();
+        let mut tabs = Tabs::new();
+        let s = app_screen(120, 30, &mut tabs, &rows);
+        assert!(
+            s[0].contains("Sessions") && s[0].contains("Settings"),
+            "{:?}",
+            s[0]
+        );
+        // The waiting session is counted on the Sessions tab, visible from every tab.
+        assert!(s[0].contains("Sessions ⏸1"), "{:?}", s[0]);
+        assert!(s[1].contains("3 live"), "{:?}", s[1]);
+        tabs.switch(Tab::Prs);
+        let s = app_screen(120, 30, &mut tabs, &rows);
+        assert!(s[0].contains("Sessions ⏸1"), "{:?}", s[0]);
+        assert!(s[1..].join("\n").contains("PRs — coming soon"), "{s:?}");
+        assert!(!s.join("\n").contains("3 live"), "{s:?}");
     }
 
     #[test]
