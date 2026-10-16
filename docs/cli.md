@@ -265,6 +265,7 @@ Other tabs (each loads in the background the first time it is shown; `r` reloads
 | tab | keys |
 | --- | --- |
 | PRs | `bearclaw prs` grouped by column · ↑/↓ `j`/`k` move · Enter/`o` open in the browser |
+| Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
 | Tasks | your open [Productive](https://productive.io) tasks, due date first (overdue red) · Enter read · `o` open in the browser |
 
 The Tasks tab reads `productive.organizationId` (required — `bearclaw config set productive.organizationId '"<id>"'`),

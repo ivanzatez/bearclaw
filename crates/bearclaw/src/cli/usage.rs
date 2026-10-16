@@ -100,7 +100,7 @@ fn local_time(ts: &str) -> Option<String> {
 }
 
 /// `resets in 2h 20m` within a day, `resets Fri 14:00` otherwise.
-fn resets(ts: &str, now: DateTime<Utc>) -> Option<String> {
+pub(crate) fn resets(ts: &str, now: DateTime<Utc>) -> Option<String> {
     let t = DateTime::parse_from_rfc3339(ts).ok()?.with_timezone(&Utc);
     let mins = (t - now).num_minutes().max(0);
     Some(if mins < 60 {

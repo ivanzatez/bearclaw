@@ -6,6 +6,7 @@ pub mod loader;
 pub mod pager;
 pub mod prs;
 pub mod tasks;
+pub mod usage;
 
 use std::path::PathBuf;
 
@@ -214,6 +215,7 @@ impl Tabs {
             .map(|&t| match t {
                 Tab::Prs => Box::new(prs::PrsView::new()) as Box<dyn View>,
                 Tab::Tasks => Box::new(tasks::TasksView::new()),
+                Tab::Usage => Box::new(usage::UsageView::new()),
                 _ => Box::new(Placeholder(t.title())),
             })
             .collect();
