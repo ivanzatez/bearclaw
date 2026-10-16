@@ -236,7 +236,7 @@ whose dormant list can't be fetched has nothing pruned that run.
 
 ### Dashboard keys (`watch`)
 
-The dashboard has tabs — **Sessions · PRs · Tasks · Usage · Brain · Notepad · Settings** — on its
+The dashboard has tabs — **Sessions · PRs · Tasks · Todo · Usage · Brain · Notepad · Settings** — on its
 first row. Tab / Shift-Tab, Shift-→ / Shift-← (or a tap on the bar) switch them; on a narrow pane the bar shortens to
 `Ses PR Tsk …`, then to `‹ Active ›` whose arrows step to the neighbouring tab. The Sessions label
 carries `⏸N` while N sessions wait for you, so it shows from every tab. Session polling and
@@ -247,6 +247,10 @@ Opening a tmux session sets three of its tmux options so it can be driven from h
 `status off`, `prefix None` (Ctrl+B and every other key reach the program inside) and `mouse on`.
 New sessions run the `claude` config value as their command — set it to add flags, e.g.
 `bearclaw config set claude '"claude --dangerously-skip-permissions"'`.
+
+When the selected session has a todo item or a sticky note (`bearclaw sticky`), a **Sticky**
+panel shows them: beside the list on a pane 120+ columns wide, below it otherwise. An open
+session's header line shows its todo item too.
 
 Sessions tab:
 
@@ -279,6 +283,7 @@ button at the right end of the tab bar, on any tab — reloads now):
 | Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
 | Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |
 | Settings | one page: config file, web server (and whether it answers), brain folder and hook, Productive org and token, spawn dirs, repos, PR scope · `e` edits the config, re-read on return |
+| Todo | one-line work items (`bearclaw todo`): ● in progress (with its session ⧉ and a Productive task ↗ when it has them), ○ open, ✓ done in the last 3 days · Enter opens the task in the browser, or goes to the session · `g` go to the session · `n` add · `x` done / reopen · `c` start a Claude session on the item (it claims it) · `d` delete (asks `y`). Re-read whenever a session writes it |
 | Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
 | Tasks | your open [Productive](https://productive.io) tasks — only those assigned to you right now (each task's assignee is checked: the API's assignee filter lags) — grouped by workflow status in board order (`g` switches to grouping by project), due date first within a group (overdue red) · Enter (or `o`) opens the task in Productive in the browser |
 
@@ -465,6 +470,26 @@ completion reads), else `~/brain`. One topic per note; the title is the first `#
 | `bearclaw brain path` | print the folder |
 
 Always runs on this machine (`-H` / `BEARCLAW_HOST` are ignored): the hook runs inside a session.
+
+## Todo and sticky notes
+
+What each Claude session is doing, kept current by the sessions themselves (the SessionStart
+hook installed by `bearclaw brain install` tells every session how) and shown on the dashboard.
+The todo is `$BEARCLAW_TODO_FILE`, else `${XDG_STATE_HOME:-~/.local/state}/bearclaw/todo.json`
+(every change locked); sticky notes are `$BEARCLAW_STICKY_DIR`, else `…/bearclaw/sticky/<session id>.md`.
+"The calling session" is `--session <target>`, else the Claude session the command runs inside
+(found through the process tree) — outside one, these commands say so and exit 1.
+
+| command | does |
+| --- | --- |
+| `bearclaw todo` / `todo list [--json]` | the items: `● #id text ⧉ session ↗ task` (● doing, ○ open, ✓ done) |
+| `bearclaw todo add <text…> [--task <url>]` | an item nobody is on yet |
+| `bearclaw todo set <text…> [--task <url>] [--session <t>]` | the calling session's own item, one line (≤ 120 chars): updated when it has one in progress, else added; a task link already there stays unless a new one is given |
+| `bearclaw todo claim <id> [--session <t>]` | the calling session takes item `id` |
+| `bearclaw todo done [<id>] [--session <t>]` | mark done (default: the calling session's item) |
+| `bearclaw todo rm <id>` | remove an item |
+| `bearclaw sticky set <bullet…> [--session <t>]` | replace the calling session's note: one bullet per argument, one line each, at most 6 |
+| `bearclaw sticky show [<target>] [--json]` | a session's note |
 
 ## Pull requests
 

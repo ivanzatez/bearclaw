@@ -183,6 +183,10 @@ A **stack** is a set of sessions — on one host or across hosts — that share 
 
 The brain is a folder of markdown notes (`bearclaw brain path`; config `brain.root`, default `~/brain`) that every Claude session on this machine shares. `bearclaw brain install` creates it and adds a SessionStart hook to `~/.claude/settings.json` that hands each new session the brain's location, how to use it and its note index (`--uninstall` removes the hook). Read and write the notes with your ordinary file tools: one topic per note, `# Title` on the first line, update an existing note before creating a new one, and keep task progress and secrets out. The dashboard's Brain tab browses, searches and edits the same files.
 
+## Todo and sticky note
+
+The user follows every session from the bearclaw dashboard. Keep your **todo item** current — one line on what you're working on: `bearclaw todo set "<one line>"` (add `--task <Productive task URL>` when there is one), again when the focus changes, `bearclaw todo done` when finished; if your first prompt names todo item #N, `bearclaw todo claim N`. Keep your **sticky note** current — up to 6 short bullets on what you're doing and what's done: `bearclaw sticky set "<bullet>" "<bullet>" …`. Both find your session themselves. `bearclaw todo` lists everyone's items.
+
 ## Scheduled jobs
 
 `bearclaw jobs` lists the cron jobs configured on a host (config `jobs`): each spawns a session on schedule, and that session's own spawns join the same run. `bearclaw jobs show <name>` has the latest runs as session trees; `bearclaw jobs run <name>` starts one now (it starts an agent: **confirm like `spawn`**); `enable` / `disable` pause and resume. A session a job started has `origin: { job, run }` in `bearclaw list --json`.
