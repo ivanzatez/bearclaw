@@ -14,7 +14,7 @@ use super::loader::Loader;
 use super::pager::wrap;
 use super::{Outcome, View, common_key};
 use crate::cli::render::{ago, fit};
-use crate::core::prs::{self, Column, Mode, Pr, View as PrView};
+use crate::core::prs::{self, Column, Mode, Pr, Rotting, View as PrView};
 use crate::core::tools::open_url;
 
 /// `prs.refresh` decides when `Mode::Auto` really fetches; this only bounds how often we ask.
@@ -57,6 +57,16 @@ pub struct PrsView {
 impl Default for PrsView {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// How long a PR has waited for its column, as a traffic light: fresh green, warming or stale
+/// yellow, rotting or worse red (the thresholds are per column, `prs::rotting`).
+pub fn rot_color(r: Rotting) -> Color {
+    match r {
+        Rotting::Fresh => Color::Green,
+        Rotting::Warming | Rotting::Stale => Color::Yellow,
+        Rotting::Rotting | Rotting::Critical => Color::Red,
     }
 }
 
@@ -157,19 +167,20 @@ impl PrsView {
         } else {
             String::new()
         };
-        lines.push(Line::styled(
-            fit(
-                &format!("{}  {}{comments}", p.size, ago(Some(p.updated_at))),
-                w,
-            ),
-            Style::default().fg(Color::Gray),
-        ));
+        let rot = rot_color(p.rotting);
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}  ", p.size), Style::default().fg(Color::Gray)),
+            Span::styled(ago(Some(p.updated_at)), Style::default().fg(rot)),
+            Span::styled(comments, Style::default().fg(Color::Gray)),
+        ]));
+        // The border says how long it has waited; the selected card's is bold.
+        let border = Style::default().fg(rot);
         let border = if selected {
-            Color::Cyan
+            border.add_modifier(Modifier::BOLD)
         } else {
-            Color::DarkGray
+            border
         };
-        (lines, Style::default().fg(border))
+        (lines, border)
     }
 
     fn draw_lane(
@@ -228,7 +239,11 @@ impl PrsView {
             let (lines, style) = Self::card(&self.prs()[i], selected, inner.width);
             let card = Block::default()
                 .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
+                .border_type(if selected {
+                    BorderType::Thick
+                } else {
+                    BorderType::Rounded
+                })
                 .border_style(style);
             f.render_widget(
                 Paragraph::new(lines).block(card),
@@ -375,6 +390,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
 
     fn pr(column: Column, number: u64, title: &str) -> Pr {
         Pr {
@@ -529,6 +545,27 @@ mod tests {
         for (w, h) in [(0, 0), (1, 1), (10, 3), (26, 5)] {
             screen(&mut v, w, h);
         }
+    }
+
+    #[test]
+    fn cards_are_coloured_by_how_long_they_wait() {
+        assert_eq!(rot_color(Rotting::Fresh), Color::Green);
+        assert_eq!(rot_color(Rotting::Warming), Color::Yellow);
+        assert_eq!(rot_color(Rotting::Stale), Color::Yellow);
+        assert_eq!(rot_color(Rotting::Rotting), Color::Red);
+        assert_eq!(rot_color(Rotting::Critical), Color::Red);
+        let mut old = pr(Column::WaitingOnMe, 1, "old one");
+        old.rotting = Rotting::Critical;
+        let mut v = view_with(vec![old]);
+        let mut t = Terminal::new(TestBackend::new(160, 20)).unwrap();
+        t.draw(|f| v.draw(f, f.area())).unwrap();
+        let buf = t.backend().buffer().clone();
+        let corner = buf
+            .content()
+            .iter()
+            .find(|c| c.symbol() == "╭")
+            .expect("a card");
+        assert_eq!(corner.fg, Color::Red);
     }
 
     #[test]
