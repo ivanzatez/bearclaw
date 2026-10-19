@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind,
+    Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -1063,6 +1063,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             match term_input(t, &ev, dash.term_area, &dash.tab_hits) {
                 TermInput::Leave => dash.term = None,
                 TermInput::Switch(to) => tabs.switch(to),
+                TermInput::Step(next) => tabs.switch(step(tabs.active, next)),
                 TermInput::None => {}
             }
             continue;
@@ -1076,6 +1077,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 TermInput::Leave if dead => dash.claw = None,
                 TermInput::Leave => tabs.switch(Tab::Sessions),
                 TermInput::Switch(to) => tabs.switch(to),
+                TermInput::Step(next) => tabs.switch(step(tabs.active, next)),
                 TermInput::None => {}
             }
             continue;
@@ -1394,6 +1396,12 @@ enum TermInput {
     /// Ctrl+L, a tap on the header, or any key once the session has ended.
     Leave,
     Switch(Tab),
+    /// Shift+→ (true) / Shift+← (false): the next or previous tab, terminal or not.
+    Step(bool),
+}
+
+fn step(t: Tab, next: bool) -> Tab {
+    if next { t.next() } else { t.prev() }
 }
 
 /// An event for an open terminal: keys, paste and wheel go into it; the way out and taps on the
@@ -1403,6 +1411,13 @@ fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) ->
         Event::Key(k) if k.kind != KeyEventKind::Release => {
             if term_keys::is_leave(*k) || !t.embed.alive() {
                 return TermInput::Leave;
+            }
+            // Shift+arrows move between tabs from anywhere; Tab / Shift+Tab stay the program's.
+            if let Some(next) = tabs::tab_step(*k).filter(|_| {
+                k.modifiers.contains(KeyModifiers::SHIFT)
+                    && matches!(k.code, KeyCode::Left | KeyCode::Right)
+            }) {
+                return TermInput::Step(next);
             }
             if let Some(bytes) = term_keys::encode(*k) {
                 t.embed.write(&bytes);
@@ -2442,6 +2457,56 @@ mod tests {
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn shift_arrows_still_switch_tabs_from_an_open_terminal() {
+        let mut cmd = portable_pty::CommandBuilder::new("sh");
+        cmd.args(["-c", "exec sleep 5"]);
+        let mut t = Term {
+            session: "x".into(),
+            id: None,
+            embed: Embedded::attach_cmd(cmd, 5, 20).unwrap(),
+        };
+        let key = |c, m| Event::Key(crossterm::event::KeyEvent::new(c, m));
+        let none: &[(Tab, u16, u16)] = &[];
+        assert_eq!(
+            term_input(
+                &mut t,
+                &key(KeyCode::Right, KeyModifiers::SHIFT),
+                Rect::default(),
+                none
+            ),
+            TermInput::Step(true)
+        );
+        assert_eq!(
+            term_input(
+                &mut t,
+                &key(KeyCode::Left, KeyModifiers::SHIFT),
+                Rect::default(),
+                none
+            ),
+            TermInput::Step(false)
+        );
+        // Tab and Shift+Tab are Claude's (completion, permission mode).
+        assert_eq!(
+            term_input(
+                &mut t,
+                &key(KeyCode::Tab, KeyModifiers::NONE),
+                Rect::default(),
+                none
+            ),
+            TermInput::None
+        );
+        assert_eq!(
+            term_input(
+                &mut t,
+                &key(KeyCode::BackTab, KeyModifiers::SHIFT),
+                Rect::default(),
+                none
+            ),
+            TermInput::None
+        );
     }
 
     #[test]
