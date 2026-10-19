@@ -66,7 +66,7 @@ You are not a work session: do not set a todo item or a sticky note for yourself
 /// `exec`, so the shell ends with Claude and a Claw that exits reads as ended, not as a bare
 /// shell pretending to be Claw.
 pub fn launcher(base: &str) -> String {
-    format!("exec env -u ANTHROPIC_MODEL {base}")
+    format!("exec {}", crate::core::tools::without_model_env(base))
 }
 
 /// The tmux option that marks the `claw` session as ours (a session of yours that happens to be

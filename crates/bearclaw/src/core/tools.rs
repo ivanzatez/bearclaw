@@ -186,6 +186,12 @@ pub fn split_http_status(out: &str) -> (String, u16) {
     }
 }
 
+/// A launcher with a shell-wide `ANTHROPIC_MODEL` dropped, so a session bearclaw starts runs on
+/// Claude Code's own default model, whatever a `.zshrc` pins for terminal sessions.
+pub fn without_model_env(launcher: &str) -> String {
+    format!("env -u ANTHROPIC_MODEL {launcher}")
+}
+
 /// Open an `http(s)` link in the default browser (`open`, else `xdg-open`). Anything else is
 /// refused: these links come from APIs, and `open` would happily run a file.
 pub fn open_url(url: &str) -> Result<(), String> {
@@ -224,6 +230,15 @@ mod tests {
         );
         assert_eq!(split_http_status("\n000"), (String::new(), 0));
         assert_eq!(split_http_status("garbage"), ("garbage".to_string(), 0));
+    }
+
+    #[test]
+    fn default_model_drops_a_shell_wide_pin() {
+        // A session the user opens in bearclaw runs on Claude Code's default, not a .zshrc pin.
+        assert_eq!(
+            without_model_env("claude --dangerously-skip-permissions"),
+            "env -u ANTHROPIC_MODEL claude --dangerously-skip-permissions"
+        );
     }
 
     #[test]

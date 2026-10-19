@@ -1628,7 +1628,7 @@ fn spawn_in_tmux(
                 None,
                 None,
                 false,
-                &Harness::Claude.command(),
+                &crate::core::tools::without_model_env(&Harness::Claude.command()),
                 Harness::Claude,
                 None,
             )
