@@ -299,6 +299,12 @@ pub struct Pr {
     /// Joined at read time, never cached: where the repo and the head branch are checked out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<Local>,
+    /// The Productive task the PR names (tb-pr reads it from the PR body).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub productive_task_id: Option<String>,
+    /// Reviewers whose latest review asks for changes (tb-pr).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes_requested_by: Vec<String>,
 }
 
 /// Someone's `@you` on a PR (its description, a comment, a review or a review comment).
@@ -443,6 +449,8 @@ fn parse_node(n: &Value, column: Column, me: &str) -> Option<Pr> {
         mention: None,
         rotting: Rotting::Fresh,
         local: None,
+        productive_task_id: None,
+        changes_requested_by: Vec::new(),
     })
 }
 

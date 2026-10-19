@@ -15,6 +15,7 @@ use super::pager::wrap;
 use super::{Outcome, View, common_key};
 use crate::cli::render::{ago, fit};
 use crate::core::prs::{self, Column, Mode, Pr, Rotting, View as PrView};
+use crate::core::tbpr;
 use crate::core::tools::open_url;
 
 /// `prs.refresh` decides when `Mode::Auto` really fetches; this only bounds how often we ask.
@@ -24,22 +25,48 @@ const LANE_MIN: u16 = 26;
 /// Rows one card takes: border, two title lines, `repo#N`, meta, border.
 const CARD_H: u16 = 6;
 
-/// The lanes, in tb-pr's order and wording. "Waiting on author" has no lane.
-const LANES: [(&str, Column); 5] = [
-    ("Draft", Column::DraftMine),
-    ("In review", Column::ReviewMine),
-    ("Ready to merge", Column::ReadyToMergeMine),
-    ("Waiting on me", Column::WaitingOnMe),
-    ("Mentions", Column::UnseenMentions),
-];
+/// One kanban lane: its title, column, the PRs it shows (indices into `prs`) and how many
+/// drafts the draft filter hides from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lane {
+    pub title: String,
+    pub column: Column,
+    pub idx: Vec<usize>,
+    pub hidden_drafts: usize,
+}
 
-/// Every lane, empty ones included, each with its PRs (indices into `prs`).
-pub fn lanes(prs: &[Pr]) -> Vec<(&'static str, Column, Vec<usize>)> {
-    LANES
+/// The lanes in tb-pr's order and wording, empty ones included. Drafts asking for your review
+/// (or waiting on their author) stay hidden while `hide_drafts`; "Waiting on author" has a lane
+/// only with `show_author` — both tb-pr's defaults and its `D` / `A` keys.
+pub fn lanes(prs: &[Pr], hide_drafts: bool, show_author: bool) -> Vec<Lane> {
+    let order = [
+        ("Draft", Column::DraftMine, true),
+        ("In review", Column::ReviewMine, true),
+        ("Ready to merge", Column::ReadyToMergeMine, true),
+        ("Waiting on me", Column::WaitingOnMe, true),
+        ("Waiting on author", Column::WaitingOnAuthor, show_author),
+        ("Mentions", Column::UnseenMentions, true),
+    ];
+    order
         .into_iter()
-        .map(|(title, col)| {
-            let idx: Vec<usize> = (0..prs.len()).filter(|&i| prs[i].column == col).collect();
-            (title, col, idx)
+        .filter(|(_, _, shown)| *shown)
+        .map(|(title, column, _)| {
+            let filtered =
+                hide_drafts && matches!(column, Column::WaitingOnMe | Column::WaitingOnAuthor);
+            let all: Vec<usize> = (0..prs.len())
+                .filter(|&i| prs[i].column == column)
+                .collect();
+            let idx: Vec<usize> = all
+                .iter()
+                .copied()
+                .filter(|&i| !(filtered && prs[i].draft))
+                .collect();
+            Lane {
+                title: title.to_string(),
+                column,
+                hidden_drafts: all.len() - idx.len(),
+                idx,
+            }
         })
         .collect()
 }
@@ -52,12 +79,47 @@ pub struct PrsView {
     card: HashMap<Column, usize>,
     /// The leftmost lane on screen when they don't all fit.
     first_lane: usize,
+    /// tb-pr's `D`: drafts asking for your review stay out of sight (on by default).
+    hide_drafts: bool,
+    /// tb-pr's `A`: the "Waiting on author" lane (off by default).
+    show_author: bool,
+    /// `<app>/<org slug>` for task links; read from the config when first needed.
+    pub(crate) task_base: Option<String>,
+    /// How links open — swapped out in tests, which must not launch a browser.
+    pub(crate) opener: fn(&str) -> Result<(), String>,
 }
 
 impl Default for PrsView {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Put `text` on the clipboard (`pbcopy`, else `wl-copy` / `xclip`).
+fn copy(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let tools: [(&str, &[&str]); 3] = [
+        ("pbcopy", &[]),
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+    ];
+    for (bin, args) in tools {
+        let Ok(mut child) = std::process::Command::new(bin)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        return child
+            .wait()
+            .map_err(|e| format!("{bin}: {e}"))
+            .and_then(|st| st.success().then_some(()).ok_or(format!("{bin} failed")));
+    }
+    Err("no clipboard tool (pbcopy, wl-copy, xclip)".into())
 }
 
 /// How long a PR has waited for its column, as a traffic light: fresh green, warming or stale
@@ -86,11 +148,19 @@ impl PrsView {
             lane: 0,
             card: HashMap::new(),
             first_lane: 0,
+            hide_drafts: true,
+            show_author: false,
+            task_base: None,
+            opener: open_url,
         }
     }
 
     fn fetch(&mut self, mode: Mode) {
         self.load.start(move || {
+            // tb-pr's board when it is installed (its rules, exactly); bearclaw's own otherwise.
+            if let Some(bin) = tbpr::binary() {
+                return tbpr::fetch(&bin, mode == Mode::Refresh);
+            }
             let now = chrono::Utc::now().timestamp_millis();
             prs::get(&prs::Settings::load(), mode, now).map_err(|e| e.to_string())
         });
@@ -100,26 +170,50 @@ impl PrsView {
         self.load.data.as_ref().map_or(&[], |v| &v.snap.prs)
     }
 
+    fn lanes(&self) -> Vec<Lane> {
+        lanes(self.prs(), self.hide_drafts, self.show_author)
+    }
+
     pub fn selected_pr(&self) -> Option<&Pr> {
-        let lanes = lanes(self.prs());
-        let (_, col, idx) = lanes.get(self.lane.min(lanes.len().saturating_sub(1)))?;
+        let lanes = self.lanes();
+        let lane = lanes.get(self.lane.min(lanes.len().saturating_sub(1)))?;
         let at = self
             .card
-            .get(col)
+            .get(&lane.column)
             .copied()
             .unwrap_or(0)
-            .min(idx.len().checked_sub(1)?);
-        Some(&self.prs()[idx[at]])
+            .min(lane.idx.len().checked_sub(1)?);
+        Some(&self.prs()[lane.idx[at]])
+    }
+
+    /// The selected PR's Productive task page, when it names one.
+    fn task_link(&mut self) -> Option<String> {
+        let id = self.selected_pr()?.productive_task_id.clone()?;
+        if self.task_base.is_none() {
+            let raw = crate::core::config::load_from(&crate::core::config::path()).raw;
+            let p = &raw["productive"];
+            let app = p["appUrl"].as_str().unwrap_or("https://app.productive.io");
+            let org = p["orgSlug"].as_str().map(str::to_string).or_else(
+                || match &p["organizationId"] {
+                    serde_json::Value::String(s) => Some(s.clone()),
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                },
+            )?;
+            self.task_base = Some(format!("{}/{org}", app.trim_end_matches('/')));
+        }
+        let base = self.task_base.as_deref()?;
+        Some(format!("{base}/tasks/{id}"))
     }
 
     fn step_card(&mut self, down: bool) {
-        let lanes = lanes(self.prs());
-        let Some((_, col, idx)) = lanes.get(self.lane) else {
+        let lanes = self.lanes();
+        let Some(lane) = lanes.get(self.lane) else {
             return;
         };
-        let at = self.card.entry(*col).or_insert(0);
+        let at = self.card.entry(lane.column).or_insert(0);
         *at = if down {
-            (*at + 1).min(idx.len().saturating_sub(1))
+            (*at + 1).min(lane.idx.len().saturating_sub(1))
         } else {
             at.saturating_sub(1)
         };
@@ -128,7 +222,13 @@ impl PrsView {
     fn card(p: &Pr, selected: bool, width: u16) -> (Vec<Line<'static>>, Style) {
         let (mark, color) = checks_mark(p);
         let w = width.saturating_sub(2) as usize;
-        let mut title = wrap(&format!("{mark}{}", p.title), w);
+        // ✎: a reviewer's latest review asks for changes.
+        let blocked = if p.changes_requested_by.is_empty() {
+            ""
+        } else {
+            "✎ "
+        };
+        let mut title = wrap(&format!("{mark}{blocked}{}", p.title), w);
         if title.len() > 2 {
             title[1] = fit(&format!("{}{}", title[1], " …"), w);
             title.truncate(2);
@@ -158,8 +258,13 @@ impl PrsView {
             lines.push(Line::default());
         }
         let draft = if p.draft { " draft" } else { "" };
+        let task = p
+            .productive_task_id
+            .as_deref()
+            .map(|id| format!(" [P-{id}]"))
+            .unwrap_or_default();
         lines.push(Line::styled(
-            fit(&format!("{}#{}{draft}", p.repo, p.number), w),
+            fit(&format!("{}#{}{task}{draft}", p.repo, p.number), w),
             Style::default().fg(Color::Cyan),
         ));
         let comments = if p.comments > 0 {
@@ -187,10 +292,11 @@ impl PrsView {
         &self,
         f: &mut Frame,
         area: Rect,
-        (title, col, idx): &(&str, Column, Vec<usize>),
+        lane: &Lane,
         selected_lane: bool,
         (more_left, more_right): (bool, bool),
     ) {
+        let (col, idx) = (&lane.column, &lane.idx);
         let left = if more_left { "‹ " } else { "" };
         let right = if more_right { " ›" } else { "" };
         let border = if selected_lane {
@@ -202,7 +308,14 @@ impl PrsView {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border))
             .title(fit(
-                &format!("{left} {title} ({}) {right}", idx.len()),
+                &match lane.hidden_drafts {
+                    0 => format!("{left} {} ({}) {right}", lane.title, idx.len()),
+                    n => format!(
+                        "{left} {} ({}, {n} draft hidden) {right}",
+                        lane.title,
+                        idx.len()
+                    ),
+                },
                 area.width.saturating_sub(2) as usize,
             ));
         let inner = block.inner(area);
@@ -273,7 +386,7 @@ impl View for PrsView {
 
     fn tick(&mut self) {
         if self.load.poll() {
-            self.lane = self.lane.min(lanes(self.prs()).len().saturating_sub(1));
+            self.lane = self.lane.min(self.lanes().len().saturating_sub(1));
         }
     }
 
@@ -303,7 +416,7 @@ impl View for PrsView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ←/→ lane · ↑/↓ card · ⏎/o open · r refresh · esc back ",
+                " ←/→ lane · ↑/↓ card · ⏎ open · t task · c copy · D drafts · A waiting on author · r refresh ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
@@ -323,7 +436,7 @@ impl View for PrsView {
             );
             return;
         }
-        let lanes = lanes(self.prs());
+        let lanes = self.lanes();
         let visible = ((inner.width / LANE_MIN).max(1) as usize).min(lanes.len());
         self.lane = self.lane.min(lanes.len() - 1);
         if self.lane < self.first_lane {
@@ -363,7 +476,7 @@ impl View for PrsView {
         }
         match k.code {
             KeyCode::Right | KeyCode::Char('l') => {
-                let n = lanes(self.prs()).len();
+                let n = self.lanes().len();
                 self.lane = (self.lane + 1).min(n.saturating_sub(1));
             }
             KeyCode::Left | KeyCode::Char('h') => self.lane = self.lane.saturating_sub(1),
@@ -372,10 +485,35 @@ impl View for PrsView {
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Enter | KeyCode::Char('o') => {
                 if let Some(p) = self.selected_pr()
-                    && let Err(e) = open_url(&p.url)
+                    && let Err(e) = (self.opener)(&p.url)
                 {
                     return Outcome::Log(e);
                 }
+            }
+            KeyCode::Char('t') => {
+                return match self.task_link() {
+                    Some(url) => match (self.opener)(&url) {
+                        Ok(()) => Outcome::None,
+                        Err(e) => Outcome::Log(e),
+                    },
+                    None => Outcome::Log("no Productive task linked on this PR".into()),
+                };
+            }
+            KeyCode::Char('c') => {
+                if let Some(p) = self.selected_pr() {
+                    return Outcome::Log(match copy(&p.url) {
+                        Ok(()) => format!("copied {}", p.url),
+                        Err(e) => e,
+                    });
+                }
+            }
+            KeyCode::Char('D') => {
+                self.hide_drafts = !self.hide_drafts;
+                self.card.clear();
+            }
+            KeyCode::Char('A') => {
+                self.show_author = !self.show_author;
+                self.lane = self.lane.min(self.lanes().len().saturating_sub(1));
             }
             _ => {}
         }
@@ -420,6 +558,8 @@ mod tests {
             mention: None,
             rotting: Rotting::default(),
             local: None,
+            productive_task_id: None,
+            changes_requested_by: vec![],
         }
     }
 
@@ -458,19 +598,68 @@ mod tests {
             pr(Column::DraftMine, 2, "draft thing"),
             pr(Column::WaitingOnAuthor, 3, "their turn"),
         ];
-        let got: Vec<(&str, Vec<usize>)> = lanes(&prs)
+        let got: Vec<(String, Vec<usize>)> = lanes(&prs, true, false)
             .into_iter()
-            .map(|(title, _, idx)| (title, idx))
+            .map(|l| (l.title, l.idx))
             .collect();
         assert_eq!(
             got,
             vec![
-                ("Draft", vec![1]),
-                ("In review", vec![]),
-                ("Ready to merge", vec![]),
-                ("Waiting on me", vec![0]),
-                ("Mentions", vec![]),
+                ("Draft".to_string(), vec![1]),
+                ("In review".to_string(), vec![]),
+                ("Ready to merge".to_string(), vec![]),
+                ("Waiting on me".to_string(), vec![0]),
+                ("Mentions".to_string(), vec![]),
             ]
+        );
+        // `A`: waiting on author gets its lane, before Mentions.
+        let titles: Vec<String> = lanes(&prs, true, true)
+            .into_iter()
+            .map(|l| l.title)
+            .collect();
+        assert_eq!(titles[4], "Waiting on author");
+    }
+
+    #[test]
+    fn a_draft_asking_for_my_review_stays_hidden_until_d() {
+        let mut asked = pr(Column::WaitingOnMe, 5, "not ready yet");
+        asked.draft = true;
+        let mut v = view_with(vec![asked, pr(Column::WaitingOnMe, 6, "ready")]);
+        let s = screen(&mut v, 160, 20);
+        assert!(
+            s.contains("Waiting on me (1, 1 draft") && !s.contains("not ready yet"),
+            "{s}"
+        );
+        key(&mut v, KeyCode::Char('D'));
+        let s = screen(&mut v, 160, 20);
+        assert!(
+            s.contains("Waiting on me (2)") && s.contains("not ready yet"),
+            "{s}"
+        );
+    }
+
+    static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    fn record(url: &str) -> Result<(), String> {
+        OPENED.lock().unwrap().push(url.to_string());
+        Ok(())
+    }
+
+    #[test]
+    fn cards_show_the_task_and_t_opens_it() {
+        let mut linked = pr(Column::DraftMine, 8, "linked");
+        linked.productive_task_id = Some("123".into());
+        linked.changes_requested_by = vec!["lead".into()];
+        let mut v = view_with(vec![linked]);
+        v.opener = record;
+        v.task_base = Some("https://app.example/42-acme".into());
+        let s = screen(&mut v, 160, 20);
+        assert!(s.contains("[P-123]") && s.contains("✎"), "{s}");
+        key(&mut v, KeyCode::Char('t'));
+        assert!(
+            OPENED
+                .lock()
+                .unwrap()
+                .contains(&"https://app.example/42-acme/tasks/123".to_string())
         );
     }
 
