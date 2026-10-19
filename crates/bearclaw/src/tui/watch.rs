@@ -1655,7 +1655,19 @@ fn draw_app(
     let [bar, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(f.area());
     let waiting = rows.iter().filter(|r| r.is_waiting()).count();
     let badge = (waiting > 0).then(|| format!("⏸{waiting}"));
-    let (line, hits) = tabs::tab_bar(tabs.active, bar.width, badge);
+    // A pixel-art paw sits left of the tabs on a wide enough bar; a narrow pane gives the
+    // columns back so the tabs are never clipped for it (see `tabs::paw_logo`).
+    let logo = (bar.width >= 80).then(tabs::paw_logo);
+    let logo_w = logo.as_ref().map_or(0, |_| tabs::PAW_LOGO_WIDTH);
+    let (mut line, mut hits) = tabs::tab_bar(tabs.active, bar.width.saturating_sub(logo_w), badge);
+    if let Some(mut spans) = logo {
+        for h in hits.iter_mut() {
+            h.1 += logo_w;
+            h.2 += logo_w;
+        }
+        spans.extend(line.spans);
+        line = Line::from(spans);
+    }
     let used = width_of(
         &line
             .spans
