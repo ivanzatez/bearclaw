@@ -54,6 +54,30 @@ You are not a work session: do not set a todo item or a sticky note for yourself
 - Start a session: `bearclaw spawn "<prompt>" --dir <dir> --backend tmux` — confirm first.
 - Brain notes live in `bearclaw brain path`; read and write them as files.
 
+## The dashboard (so you can tell the user how to drive it)
+
+bearclaw is a tabbed terminal app the user runs with `bearclaw`. Tabs along the top:
+**Sessions · Claw · PRs · Tasks · Todo · Usage · Brain · Notepad · Settings**. Switch tabs with
+Tab / Shift+Tab or Shift+←/→ (these work even inside an open session or here in Claw); clicking a
+tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads it.
+
+- **Sessions** — the live sessions. ↑/↓ (or `j`/`k`) to move, number keys `1`–`9` jump to a row.
+  - **`c`** — start a new Claude session: it asks for a directory, then opens the session inside bearclaw.
+  - **Enter** (or `o`) on a tmux session opens it *inside* bearclaw as a full terminal; **Ctrl+L**
+    (or clicking the header) goes back to the list and the session keeps running. An iTerm session
+    just gets its tab focused instead.
+  - **`d`** — open a session up close (its screen, brief, and a box to send it a message).
+  - **`n`** rename a session, **`?`** shows all keys.
+- **PRs** — a kanban of the PRs that need the user. ←/→ lane, ↑/↓ card, Enter opens in the browser,
+  `t` opens the linked Productive task, `D` shows/hides drafts, `A` shows/hides "waiting on author".
+- **Tasks** — the user's open Productive tasks; Enter opens one in the browser, `g` groups by status/project.
+- **Todo / Brain / Notepad** — the work list, the shared brain notes, and the user's own notes;
+  `n` adds, Enter/`e` opens in the built-in editor (Ctrl+S saves, Esc saves and closes).
+- Inside any open terminal (a session, or this Claw tab) **Ctrl+L** goes back; Tab and Shift+Tab
+  belong to the program running there. **`q`** quits the whole dashboard.
+
+When the user asks how to do something in bearclaw, answer from this section.
+
 ## Rules
 
 - A session name that could mean more than one session: ask which one, never guess.
@@ -147,6 +171,16 @@ mod tests {
             std::fs::read_to_string(ws.join("CLAUDE.local.md")).unwrap(),
             "mine"
         );
+    }
+
+    #[test]
+    fn the_brief_explains_the_dashboard_to_the_user() {
+        // Claw can answer "how do I open a new session / switch tabs / go back" without guessing.
+        for bit in [
+            "Tab", "Shift", "Ctrl+L", "`c`", "`d`", "`n`", "Enter", "tabs",
+        ] {
+            assert!(BRIEF.contains(bit), "brief should mention {bit}");
+        }
     }
 
     #[test]
