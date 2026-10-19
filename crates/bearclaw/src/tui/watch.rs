@@ -14,11 +14,13 @@ use std::time::{Duration, Instant};
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, MouseButton,
+    MouseEventKind, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    supports_keyboard_enhancement,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -250,12 +252,16 @@ fn run_quiet(interval_secs: u64, stuck_secs: i64) -> Result<()> {
 /// the shell you return to with an invisible caret.
 struct TermGuard {
     mouse: bool,
+    /// Whether setup pushed the kitty keyboard-protocol flags, so teardown pops
+    /// exactly what it pushed and never underflows a terminal that lacked them.
+    enhanced: bool,
 }
 impl Drop for TermGuard {
     fn drop(&mut self) {
         if self.mouse {
             let _ = execute!(io::stdout(), DisableMouseCapture);
         }
+        let _ = pop_keyboard_enhancement(&mut io::stdout(), self.enhanced);
         let _ = execute!(
             io::stdout(),
             DisableBracketedPaste,
@@ -264,6 +270,35 @@ impl Drop for TermGuard {
         );
         let _ = disable_raw_mode();
     }
+}
+
+/// Asks the outer terminal to disambiguate escape codes (the kitty keyboard
+/// protocol's first level) when it advertises support, so modified keys —
+/// Shift+Enter above all, but also Ctrl+… and Alt+… — arrive as distinct events
+/// instead of collapsing onto their legacy bytes. Without it iTerm delivers
+/// Shift+Enter as a bare `KeyCode::Enter` with no `SHIFT`, and the embedded
+/// program never gets the ESC-CR that Claude Code reads as "newline, don't send".
+///
+/// Only `DISAMBIGUATE_ESCAPE_CODES` is requested — not event-type reporting — so
+/// no key-release or repeat events start arriving. Returns whether the flags were
+/// pushed, which the teardown guard uses to pop precisely what was pushed.
+fn push_keyboard_enhancement<W: io::Write>(w: &mut W, supported: bool) -> io::Result<bool> {
+    if supported {
+        execute!(
+            w,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+    }
+    Ok(supported)
+}
+
+/// Undoes [`push_keyboard_enhancement`]. A no-op when nothing was pushed, so a
+/// terminal that never received the flags doesn't have its protocol stack popped.
+fn pop_keyboard_enhancement<W: io::Write>(w: &mut W, enhanced: bool) -> io::Result<()> {
+    if enhanced {
+        execute!(w, PopKeyboardEnhancementFlags)?;
+    }
+    Ok(())
 }
 
 /// `"1"`/`"2"`/`"auto"` from the config, folded with the command-line override.
@@ -771,8 +806,13 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         .unwrap_or(true);
 
     enable_raw_mode().map_err(Error::Io)?;
+    // Probe before the alternate screen and the event loop: the terminal answers
+    // the query as input, and we want that reply consumed here, not mid-dashboard.
+    let supports_enhancement = supports_keyboard_enhancement().unwrap_or(false);
     execute!(io::stdout(), EnterAlternateScreen).map_err(Error::Io)?;
-    let _guard = TermGuard { mouse };
+    let enhanced =
+        push_keyboard_enhancement(&mut io::stdout(), supports_enhancement).map_err(Error::Io)?;
+    let _guard = TermGuard { mouse, enhanced };
     if mouse {
         execute!(io::stdout(), EnableMouseCapture).map_err(Error::Io)?;
     }
@@ -3435,5 +3475,34 @@ mod tests {
             let s = screen(w, h, None);
             assert_eq!(s.len(), h as usize);
         }
+    }
+
+    // A terminal that advertises the kitty keyboard protocol gets exactly the
+    // escape-code disambiguation push (flags = 1), and teardown pops precisely
+    // what setup pushed — so Shift+Enter arrives as Enter+SHIFT (→ ESC CR for the
+    // embedded program) without turning on release/repeat reporting.
+    #[test]
+    fn keyboard_enhancement_pushed_only_when_supported() {
+        // Supported: push the DISAMBIGUATE flag and report that we did.
+        let mut buf = Vec::new();
+        let enhanced = push_keyboard_enhancement(&mut buf, true).unwrap();
+        assert!(enhanced);
+        assert_eq!(buf, b"\x1b[>1u");
+
+        // Teardown pops exactly once for what was pushed.
+        let mut buf = Vec::new();
+        pop_keyboard_enhancement(&mut buf, enhanced).unwrap();
+        assert_eq!(buf, b"\x1b[<1u");
+
+        // Unsupported: write nothing and report nothing to pop, so the terminal's
+        // flag stack is never underflowed on exit.
+        let mut buf = Vec::new();
+        let enhanced = push_keyboard_enhancement(&mut buf, false).unwrap();
+        assert!(!enhanced);
+        assert!(buf.is_empty());
+
+        let mut buf = Vec::new();
+        pop_keyboard_enhancement(&mut buf, enhanced).unwrap();
+        assert!(buf.is_empty());
     }
 }
