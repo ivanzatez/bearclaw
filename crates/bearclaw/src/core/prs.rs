@@ -18,12 +18,15 @@
 //! Config (`prs` in config.json — per machine, read leniently):
 //!
 //! ```json
-//! "prs": { "orgs": ["acme"], "repos": ["someone/tool"], "refresh": "5m", "worktrees": "~/Code/worktrees" }
+//! "prs": { "orgs": ["acme"], "repos": ["someone/tool"], "refresh": "5m", "worktrees": "~/Code/worktrees",
+//!           "reviewPrompt": "Review this pull request …" }
 //! ```
 //!
 //! `orgs` / `repos` scope the searches (any of them; none = all of GitHub). `refresh` is how old
 //! the cache may get before a plain `bearclaw prs` fetches again. `worktrees` is where
-//! [`checkout`] puts new worktrees (default [`DEFAULT_WORKTREES`]).
+//! [`checkout`] puts new worktrees (default [`DEFAULT_WORKTREES`]). `reviewPrompt` is what a
+//! review session started from the PRs tab is asked, after the PR's [`context_line`] (default
+//! [`DEFAULT_REVIEW_PROMPT`]).
 //!
 //! Cache (`$BEARCLAW_PRS_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/bearclaw/prs.json`): the last
 //! successful fetch. A failed fetch keeps serving it, with the error alongside.
@@ -43,6 +46,7 @@ use crate::error::{Error, Result};
 
 pub const DEFAULT_REFRESH: &str = "5m";
 pub const DEFAULT_WORKTREES: &str = "~/Code/worktrees";
+pub const DEFAULT_REVIEW_PROMPT: &str = "Review this pull request: load the p-dev:review skill and follow it. Post nothing on GitHub until I approve the draft.";
 const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(180);
 /// One search page; GitHub's gateway gives up on bigger ones (~10 s) with all the fields below.
 const PAGE: usize = 50;
@@ -65,6 +69,8 @@ pub struct Settings {
     pub refresh: i64,
     /// Where `bearclaw pr checkout` puts new worktrees (`~` allowed).
     pub worktrees: String,
+    /// What a review session started from the PRs tab is asked.
+    pub review_prompt: String,
     /// What was wrong with the section; the bad parts fall back to defaults.
     pub problems: Vec<String>,
 }
@@ -117,11 +123,22 @@ impl Settings {
                 }
             },
         };
+        let review_prompt = match v.get("reviewPrompt").filter(|x| !x.is_null()) {
+            None => DEFAULT_REVIEW_PROMPT.to_string(),
+            Some(x) => match x.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(s) => s.to_string(),
+                None => {
+                    problems.push(format!("prs.reviewPrompt: {x} is not a prompt"));
+                    DEFAULT_REVIEW_PROMPT.to_string()
+                }
+            },
+        };
         Settings {
             orgs,
             repos,
             refresh,
             worktrees,
+            review_prompt,
             problems,
         }
     }
@@ -1672,6 +1689,23 @@ mod tests {
         assert_eq!(s.scope(), "org:acme repo:x/y");
         assert_eq!(s.refresh, 300);
         assert_eq!(s.problems.len(), 3, "{:?}", s.problems);
+    }
+
+    #[test]
+    fn the_review_prompt_defaults_and_can_be_replaced() {
+        let s = Settings::from_value(&Value::Null);
+        assert_eq!(s.review_prompt, DEFAULT_REVIEW_PROMPT);
+        assert!(
+            s.review_prompt.contains("p-dev:review"),
+            "{}",
+            s.review_prompt
+        );
+        let s = Settings::from_value(&json!({ "reviewPrompt": "  Look for bugs only.  " }));
+        assert_eq!(s.review_prompt, "Look for bugs only.");
+        assert!(s.problems.is_empty(), "{:?}", s.problems);
+        let s = Settings::from_value(&json!({ "reviewPrompt": 3 }));
+        assert_eq!(s.review_prompt, DEFAULT_REVIEW_PROMPT);
+        assert_eq!(s.problems.len(), 1, "{:?}", s.problems);
     }
 
     #[test]
