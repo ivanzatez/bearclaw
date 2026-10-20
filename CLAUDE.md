@@ -52,9 +52,9 @@ never a real home directory, real config or live sessions.
   `cargo install --path crates/bearclaw` for the CLI/dashboard, `bearclaw web build` for the UI.
 - Commit only your own files, because other sessions may have uncommitted work in the same tree.
   If another session is changing the same thing, move your work into a git worktree.
-- Pulling upstream (`git fetch upstream && git merge upstream/main`): every `fleet` there is
-  `bearclaw` here (binary, crates, `FLEET_*` env vars, paths), so expect conflicts on the name —
-  resolve them to the bearclaw spelling.
+- Pulling upstream (`git fetch upstream && git merge upstream/main`): upstream still uses the
+  project's old name for the binary, crates, env var prefix and paths, so expect conflicts on the
+  name. Resolve them to the bearclaw spelling.
 
 ## Rules
 

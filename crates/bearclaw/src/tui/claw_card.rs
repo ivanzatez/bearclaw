@@ -118,9 +118,12 @@ fn palette_bar() -> Line<'static> {
 
 /// Draw the card into `area` (one column of gutter on the left).
 pub fn render(f: &mut Frame, area: Rect, s: &Stats) {
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let sessions = plural(s.waiting, "session", "sessions");
     let waiting = match s.stat.pr_waiting {
-        Some(pr) => format!("{} sessions · {pr} PR", s.waiting),
-        None => format!("{} sessions", s.waiting),
+        Some(pr) => format!("{sessions} · {}", plural(pr, "PR", "PRs")),
+        None => sessions,
     };
     let usage = match (s.stat.usage_session, s.stat.usage_week) {
         (Some(a), Some(b)) => format!("{a:.0}% session · {b:.0}% week"),
