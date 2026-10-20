@@ -1,7 +1,7 @@
 //! The PRs tab: `bearclaw prs` as a kanban — one lane per column, one card per PR.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
@@ -18,8 +18,17 @@ use crate::core::prs::{self, Column, Mode, Pr, Rotting, View as PrView};
 use crate::core::tbpr;
 use crate::core::tools::open_url;
 
-/// `prs.refresh` decides when `Mode::Auto` really fetches; this only bounds how often we ask.
+/// `prs.refresh` decides when `Mode::Auto` really fetches; this only bounds how often we ask —
+/// both on `on_show` and the periodic pull while the tab is on screen.
 const TTL: Duration = Duration::from_secs(60);
+/// After `Enter` opens a PR, keep doing real `tb-pr refresh`es for this long, so a PR merged or
+/// closed in the browser drops off the board within a minute of coming back.
+const WATCH: Duration = Duration::from_secs(90);
+/// How often those post-open refreshes fire — tight enough to clear a merge "within a minute".
+const WATCH_PULL: Duration = Duration::from_secs(20);
+/// Drawn more recently than this ⇒ the tab is on screen (only the active tab draws, and the
+/// loop redraws several times a second).
+const ON_SCREEN: Duration = Duration::from_millis(750);
 /// The narrowest a lane gets before lanes page instead.
 const LANE_MIN: u16 = 26;
 /// Rows one card takes: border, two title lines, `repo#N`, meta, border.
@@ -87,6 +96,11 @@ pub struct PrsView {
     pub(crate) task_base: Option<String>,
     /// How links open — swapped out in tests, which must not launch a browser.
     pub(crate) opener: fn(&str) -> Result<(), String>,
+    /// When `draw` last ran. Only the active tab draws, so a recent stamp means we are on
+    /// screen and may pull on our own.
+    shown_at: Option<Instant>,
+    /// Until when the periodic pull should be a real `tb-pr refresh` — set when a PR is opened.
+    watch_until: Option<Instant>,
 }
 
 impl Default for PrsView {
@@ -130,7 +144,34 @@ impl PrsView {
             show_author: false,
             task_base: None,
             opener: open_url,
+            shown_at: None,
+            watch_until: None,
         }
+    }
+
+    /// The tab is on screen right now (drawn within the last [`ON_SCREEN`]).
+    fn on_screen(&self) -> bool {
+        self.shown_at.is_some_and(|t| t.elapsed() < ON_SCREEN)
+    }
+
+    /// We are inside the post-open window where pulls should force a real refresh.
+    fn watching(&self) -> bool {
+        self.watch_until.is_some_and(|t| Instant::now() < t)
+    }
+
+    /// Whether `tick` should pull now, and in which mode — `None` to stay put. While the tab is
+    /// on screen we keep the board fresh on our own: a cheap cached pull normally, a real
+    /// `tb-pr refresh` during the window after a PR was opened.
+    fn pull_mode(&self) -> Option<Mode> {
+        if !self.on_screen() {
+            return None;
+        }
+        let (mode, every) = if self.watching() {
+            (Mode::Refresh, WATCH_PULL)
+        } else {
+            (Mode::Auto, TTL)
+        };
+        self.load.stale(every).then_some(mode)
     }
 
     fn fetch(&mut self, mode: Mode) {
@@ -366,6 +407,11 @@ impl View for PrsView {
         if self.load.poll() {
             self.lane = self.lane.min(self.lanes().len().saturating_sub(1));
         }
+        // Keep the board fresh without a keypress while it is on screen — no-op off screen, and
+        // a no-op while a fetch is in flight (`Loader::start` guards that).
+        if let Some(mode) = self.pull_mode() {
+            self.fetch(mode);
+        }
     }
 
     fn refresh(&mut self) {
@@ -385,6 +431,8 @@ impl View for PrsView {
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
+        // Only the active tab draws, so this doubles as our "on screen" heartbeat.
+        self.shown_at = Some(Instant::now());
         let mut title = String::from(" PRs ");
         if let Some(v) = &self.load.data {
             title = format!(" PRs · @{} · {} ", v.snap.user, v.snap.prs.len());
@@ -474,10 +522,13 @@ impl View for PrsView {
             KeyCode::Up | KeyCode::Char('k') => self.step_card(false),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Enter | KeyCode::Char('o') => {
-                if let Some(p) = self.selected_pr()
-                    && let Err(e) = (self.opener)(&p.url)
-                {
-                    return Outcome::Log(e);
+                if let Some(url) = self.selected_pr().map(|p| p.url.clone()) {
+                    // Opening a PR usually precedes merging or closing it out there — start a
+                    // window of real refreshes so that change shows up within a minute.
+                    self.watch_until = Some(Instant::now() + WATCH);
+                    if let Err(e) = (self.opener)(&url) {
+                        return Outcome::Log(e);
+                    }
                 }
             }
             KeyCode::Char('t') => {
@@ -759,6 +810,96 @@ mod tests {
         assert_eq!(
             v.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             Outcome::Home
+        );
+    }
+
+    #[test]
+    fn it_pulls_periodically_only_while_on_screen() {
+        // Injected data carries no fetch timestamp, so the loader always counts as stale —
+        // this isolates the on-screen / mode logic from the staleness throttle.
+        let mut v = view_with(vec![pr(Column::WaitingOnMe, 1, "review me")]);
+        assert_eq!(v.pull_mode(), None, "never drawn ⇒ off screen ⇒ no pull");
+        screen(&mut v, 160, 20); // drawing stamps the on-screen marker
+        assert_eq!(
+            v.pull_mode(),
+            Some(Mode::Auto),
+            "on screen ⇒ a cheap cached pull"
+        );
+        // Switched to another tab: the last draw ages out and we stop pulling.
+        v.shown_at = Instant::now().checked_sub(ON_SCREEN * 2);
+        assert_eq!(
+            v.pull_mode(),
+            None,
+            "drawn too long ago ⇒ off screen ⇒ no pull"
+        );
+    }
+
+    #[test]
+    fn opening_a_pr_arms_a_real_refresh() {
+        let mut v = view_with(vec![pr(Column::DraftMine, 8, "mine")]);
+        v.opener = record;
+        screen(&mut v, 160, 20); // on screen
+        assert_eq!(
+            v.pull_mode(),
+            Some(Mode::Auto),
+            "before opening a PR: a cheap pull"
+        );
+        key(&mut v, KeyCode::Enter);
+        assert!(
+            OPENED.lock().unwrap().iter().any(|u| u.contains("/pull/8")),
+            "Enter opens the PR in the browser"
+        );
+        screen(&mut v, 160, 20); // a redraw keeps us on screen
+        assert_eq!(
+            v.pull_mode(),
+            Some(Mode::Refresh),
+            "after opening a PR: a real refresh, so a merge out there clears fast"
+        );
+    }
+
+    #[test]
+    fn the_refresh_window_lapses_back_to_cheap_pulls() {
+        let mut v = view_with(vec![pr(Column::WaitingOnMe, 1, "review me")]);
+        screen(&mut v, 160, 20); // on screen
+        v.watch_until = Some(Instant::now() + WATCH);
+        assert_eq!(
+            v.pull_mode(),
+            Some(Mode::Refresh),
+            "inside the window ⇒ real refresh"
+        );
+        v.watch_until = Instant::now().checked_sub(Duration::from_secs(1));
+        assert_eq!(
+            v.pull_mode(),
+            Some(Mode::Auto),
+            "window lapsed ⇒ back to a cheap pull"
+        );
+    }
+
+    #[test]
+    fn a_fresh_pull_waits_for_the_interval() {
+        let mut v = PrsView::new();
+        // Settle a real (but environment-free) fetch so the loader carries a fresh timestamp.
+        v.load.start(|| {
+            Ok(PrView {
+                snap: Snapshot {
+                    user: "me".into(),
+                    ..Default::default()
+                },
+                stale: false,
+                error: None,
+            })
+        });
+        let until = Instant::now() + Duration::from_secs(2);
+        while v.load.loading && Instant::now() < until {
+            v.load.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!v.load.loading, "the fetch settled");
+        screen(&mut v, 160, 20); // on screen
+        assert_eq!(
+            v.pull_mode(),
+            None,
+            "just fetched ⇒ not stale yet ⇒ no second pull"
         );
     }
 }
