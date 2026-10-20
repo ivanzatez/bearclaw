@@ -74,7 +74,8 @@ tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads 
 - **Todo / Brain / Notepad** — the work list, the shared brain notes, and the user's own notes;
   `n` adds, Enter/`e` opens in the built-in editor (Ctrl+S saves, Esc saves and closes).
 - Inside any open terminal (a session, or this Claw tab) **Ctrl+L** goes back; Tab and Shift+Tab
-  belong to the program running there. **`q`** quits the whole dashboard.
+  belong to the program running there. Drag with the left mouse button to select text (double-click
+  selects a word); it's copied to the clipboard when you let go. **`q`** quits the whole dashboard.
 
 When the user asks how to do something in bearclaw, answer from this section.
 
