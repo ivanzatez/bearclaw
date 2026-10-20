@@ -97,29 +97,7 @@ impl Default for PrsView {
 
 /// Put `text` on the clipboard (`pbcopy`, else `wl-copy` / `xclip`).
 fn copy(text: &str) -> Result<(), String> {
-    use std::io::Write;
-    let tools: [(&str, &[&str]); 3] = [
-        ("pbcopy", &[]),
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-    ];
-    for (bin, args) in tools {
-        let Ok(mut child) = std::process::Command::new(bin)
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        else {
-            continue;
-        };
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        return child
-            .wait()
-            .map_err(|e| format!("{bin}: {e}"))
-            .and_then(|st| st.success().then_some(()).ok_or(format!("{bin} failed")));
-    }
-    Err("no clipboard tool (pbcopy, wl-copy, xclip)".into())
+    crate::tui::term::clip::local(text)
 }
 
 /// How long a PR has waited for its column, as a traffic light: fresh green, warming or stale

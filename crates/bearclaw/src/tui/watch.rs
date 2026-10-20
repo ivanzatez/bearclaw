@@ -47,6 +47,7 @@ use crate::tui::tabs::session::{DetailOutcome, SessionDetail};
 use crate::tui::tabs::{self, Outcome, Tab, Tabs};
 use crate::tui::term::embed::Embedded;
 use crate::tui::term::keys as term_keys;
+use crate::tui::term::{clip, select};
 
 const EVENT_CAP: usize = 20;
 
@@ -388,6 +389,8 @@ struct Term {
     /// Its Claude session id, when it was opened from the list — for its todo line.
     id: Option<String>,
     embed: Embedded,
+    /// The mouse text selection over its screen, if any.
+    sel: select::Selection,
 }
 
 /// What a session keeps about itself for the dashboard: its todo line and sticky note.
@@ -983,6 +986,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         session: name,
                         id: None,
                         embed,
+                        sel: select::Selection::default(),
                     }
                 })
             }) {
@@ -1114,6 +1118,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 TermInput::Leave => dash.term = None,
                 TermInput::Switch(to) => tabs.switch(to),
                 TermInput::Step(next) => tabs.switch(step(tabs.active, next)),
+                TermInput::Copy(text) => copy_selection(&text, &mut log),
                 TermInput::None => {}
             }
             continue;
@@ -1128,6 +1133,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 TermInput::Leave => tabs.switch(Tab::Sessions),
                 TermInput::Switch(to) => tabs.switch(to),
                 TermInput::Step(next) => tabs.switch(step(tabs.active, next)),
+                TermInput::Copy(text) => copy_selection(&text, &mut log),
                 TermInput::None => {}
             }
             continue;
@@ -1440,7 +1446,7 @@ fn clamp_offset(dash: &mut Dash, len: usize) {
 
 // --- drawing -----------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TermInput {
     None,
     /// Ctrl+L, a tap on the header, or any key once the session has ended.
@@ -1448,6 +1454,8 @@ enum TermInput {
     Switch(Tab),
     /// Shift+→ (true) / Shift+← (false): the next or previous tab, terminal or not.
     Step(bool),
+    /// A mouse drag selected this text; the loop copies it and logs the result.
+    Copy(String),
 }
 
 fn step(t: Tab, next: bool) -> Tab {
@@ -1459,6 +1467,8 @@ fn step(t: Tab, next: bool) -> Tab {
 fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) -> TermInput {
     match ev {
         Event::Key(k) if k.kind != KeyEventKind::Release => {
+            // Typing moves on from a selection; drop its highlight.
+            t.sel.clear();
             if term_keys::is_leave(*k) || !t.embed.alive() {
                 return TermInput::Leave;
             }
@@ -1475,11 +1485,14 @@ fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) ->
             TermInput::None
         }
         Event::Paste(text) => {
+            t.sel.clear();
             t.embed.write(&term_keys::paste(text));
             TermInput::None
         }
         Event::Mouse(m) => match m.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                // Scrolling moves the screen under any selection; drop it, scroll the session.
+                t.sel.clear();
                 let up = m.kind == MouseEventKind::ScrollUp;
                 t.embed.write(&term_keys::wheel(
                     up,
@@ -1488,14 +1501,55 @@ fn term_input(t: &mut Term, ev: &Event, area: Rect, hits: &[(Tab, u16, u16)]) ->
                 ));
                 TermInput::None
             }
-            _ => match term_click(*m, area, hits) {
-                TermClick::Leave => TermInput::Leave,
-                TermClick::Switch(to) => TermInput::Switch(to),
-                TermClick::None => TermInput::None,
-            },
+            // A left press on the header or tab bar still leaves / switches; inside the
+            // screen it begins a selection (a double-click grabs the word).
+            MouseEventKind::Down(MouseButton::Left) => {
+                match term_click(*m, area, hits) {
+                    TermClick::Leave => return TermInput::Leave,
+                    TermClick::Switch(to) => return TermInput::Switch(to),
+                    TermClick::None => {}
+                }
+                if let select::SelAct::Press(cell) = select::sel_action(m, area) {
+                    t.sel.press(cell, Instant::now(), t.embed.screen());
+                }
+                TermInput::None
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let select::SelAct::Drag(cell) = select::sel_action(m, area) {
+                    t.sel.drag(cell);
+                }
+                TermInput::None
+            }
+            // Release: a real drag (or a double-click word) copies; a plain click clears.
+            MouseEventKind::Up(MouseButton::Left) => {
+                if matches!(select::sel_action(m, area), select::SelAct::Release)
+                    && let Some(range) = t.sel.release()
+                {
+                    let text = select::text(range, t.embed.screen());
+                    if !text.is_empty() {
+                        return TermInput::Copy(text);
+                    }
+                }
+                TermInput::None
+            }
+            _ => TermInput::None,
         },
         _ => TermInput::None,
     }
+}
+
+/// Copy selected terminal text to the clipboard and record the outcome. The log isn't
+/// on screen while a terminal is open, but the line is there on the way back.
+fn copy_selection(text: &str, log: &mut Vec<Ev>) {
+    let ev = match clip::copy(text) {
+        Ok(sink) => Ev::now(
+            "⎘",
+            format!("copied {} chars via {}", text.chars().count(), sink.label()),
+        ),
+        Err(e) => Ev::now("✕", format!("copy failed: {e}")),
+    };
+    log.insert(0, ev);
+    log.truncate(EVENT_CAP);
 }
 
 /// Claw's tmux session: prepare its workspace, then reuse the running session or start one.
@@ -1570,6 +1624,9 @@ fn draw_term(f: &mut ratatui::Frame, body: Rect, t: &mut Term, header: String) -
     );
     t.embed.resize(screen.height, screen.width);
     t.embed.draw(f.buffer_mut(), screen);
+    if let Some(range) = t.sel.range() {
+        select::highlight(f.buffer_mut(), screen, range);
+    }
     screen
 }
 
@@ -1630,6 +1687,7 @@ fn open_tmux(ts: &str, id: Option<String>, dash: &mut Dash, log: &mut Vec<Ev>) -
                 session: ts.to_string(),
                 id,
                 embed,
+                sel: select::Selection::default(),
             });
             true
         }
@@ -2549,6 +2607,7 @@ mod tests {
             session: "x".into(),
             id: None,
             embed: Embedded::attach_cmd(cmd, 5, 20).unwrap(),
+            sel: select::Selection::default(),
         };
         let key = |c, m| Event::Key(crossterm::event::KeyEvent::new(c, m));
         let none: &[(Tab, u16, u16)] = &[];
@@ -2589,6 +2648,158 @@ mod tests {
             ),
             TermInput::None
         );
+    }
+
+    fn mouse_term(feed: &str) -> Term {
+        let mut cmd = portable_pty::CommandBuilder::new("sh");
+        cmd.args(["-c", &format!("printf '{feed}'; exec sleep 5")]);
+        let mut embed = Embedded::attach_cmd(cmd, 10, 60).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !embed.parser.screen().contents().contains(feed) && Instant::now() < until {
+            embed.pump();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Term {
+            session: "x".into(),
+            id: None,
+            embed,
+            sel: select::Selection::default(),
+        }
+    }
+
+    fn mouse_ev(kind: crossterm::event::MouseEventKind, row: u16, column: u16) -> Event {
+        Event::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn a_left_drag_in_an_open_terminal_copies_the_selected_text() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut t = mouse_term("hello world");
+        let screen = Rect::new(0, 0, 60, 10);
+        let none: &[(Tab, u16, u16)] = &[];
+        // Press at column 0, drag across "hello", release.
+        assert_eq!(
+            term_input(
+                &mut t,
+                &mouse_ev(MouseEventKind::Down(MouseButton::Left), 0, 0),
+                screen,
+                none
+            ),
+            TermInput::None
+        );
+        assert!(t.sel.range().is_some());
+        assert_eq!(
+            term_input(
+                &mut t,
+                &mouse_ev(MouseEventKind::Drag(MouseButton::Left), 0, 4),
+                screen,
+                none
+            ),
+            TermInput::None
+        );
+        assert_eq!(
+            term_input(
+                &mut t,
+                &mouse_ev(MouseEventKind::Up(MouseButton::Left), 0, 4),
+                screen,
+                none
+            ),
+            TermInput::Copy("hello".into())
+        );
+        // The highlight persists after the copy, as visible feedback.
+        assert!(t.sel.range().is_some());
+        // Typing moves on and clears it.
+        term_input(
+            &mut t,
+            &Event::Key(crossterm::event::KeyEvent::new(
+                KeyCode::Char('x'),
+                KeyModifiers::NONE,
+            )),
+            screen,
+            none,
+        );
+        assert!(t.sel.range().is_none());
+    }
+
+    #[test]
+    fn a_plain_click_in_an_open_terminal_copies_nothing() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut t = mouse_term("hello world");
+        let screen = Rect::new(0, 0, 60, 10);
+        let none: &[(Tab, u16, u16)] = &[];
+        term_input(
+            &mut t,
+            &mouse_ev(MouseEventKind::Down(MouseButton::Left), 0, 2),
+            screen,
+            none,
+        );
+        assert_eq!(
+            term_input(
+                &mut t,
+                &mouse_ev(MouseEventKind::Up(MouseButton::Left), 0, 2),
+                screen,
+                none
+            ),
+            TermInput::None
+        );
+        assert!(t.sel.range().is_none());
+    }
+
+    #[test]
+    fn a_double_click_in_an_open_terminal_copies_the_word() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut t = mouse_term("hello world");
+        let screen = Rect::new(0, 0, 60, 10);
+        let none: &[(Tab, u16, u16)] = &[];
+        let down = mouse_ev(MouseEventKind::Down(MouseButton::Left), 0, 1);
+        let up = mouse_ev(MouseEventKind::Up(MouseButton::Left), 0, 1);
+        // First click: a plain click, nothing selected.
+        term_input(&mut t, &down, screen, none);
+        assert_eq!(term_input(&mut t, &up, screen, none), TermInput::None);
+        // Second click right after, on the same cell: selects and copies the word.
+        term_input(&mut t, &down, screen, none);
+        assert_eq!(
+            term_input(&mut t, &up, screen, none),
+            TermInput::Copy("hello".into())
+        );
+    }
+
+    #[test]
+    fn the_wheel_still_scrolls_and_drops_any_selection() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let mut t = mouse_term("hello world");
+        let screen = Rect::new(0, 0, 60, 10);
+        let none: &[(Tab, u16, u16)] = &[];
+        // Select something first.
+        term_input(
+            &mut t,
+            &mouse_ev(MouseEventKind::Down(MouseButton::Left), 0, 0),
+            screen,
+            none,
+        );
+        term_input(
+            &mut t,
+            &mouse_ev(MouseEventKind::Drag(MouseButton::Left), 0, 4),
+            screen,
+            none,
+        );
+        assert!(t.sel.range().is_some());
+        // A wheel notch scrolls the session and clears the selection.
+        assert_eq!(
+            term_input(
+                &mut t,
+                &mouse_ev(MouseEventKind::ScrollUp, 3, 3),
+                screen,
+                none
+            ),
+            TermInput::None
+        );
+        assert!(t.sel.range().is_none());
     }
 
     #[test]
@@ -2650,6 +2861,7 @@ mod tests {
             session: "demo".into(),
             id: None,
             embed,
+            sel: select::Selection::default(),
         });
         let s = app_screen_with(120, 20, &mut tabs, &rows, &mut dash);
         assert!(s[0].contains("Sessions"), "{:?}", s[0]);

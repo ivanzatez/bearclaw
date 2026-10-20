@@ -177,6 +177,11 @@ impl Embedded {
     pub fn draw(&self, buf: &mut Buffer, area: Rect) {
         draw_screen(self.parser.screen(), buf, area);
     }
+
+    /// The emulator's current screen — its cell grid, for reading selected text.
+    pub(crate) fn screen(&self) -> &vt100::Screen {
+        self.parser.screen()
+    }
 }
 
 impl Drop for Embedded {
