@@ -25,7 +25,7 @@
 //! `orgs` / `repos` scope the searches (any of them; none = all of GitHub). `refresh` is how old
 //! the cache may get before a plain `bearclaw prs` fetches again. `worktrees` is where
 //! [`checkout`] puts new worktrees (default [`DEFAULT_WORKTREES`]). `reviewPrompt` is what a
-//! review session started from the PRs tab is asked, after the PR's [`context_line`] (default
+//! review session started from the PRs tab is asked, after the line naming the PR (default
 //! [`DEFAULT_REVIEW_PROMPT`]).
 //!
 //! Cache (`$BEARCLAW_PRS_CACHE`, else `${XDG_CACHE_HOME:-~/.cache}/bearclaw/prs.json`): the last
