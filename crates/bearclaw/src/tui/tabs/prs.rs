@@ -1,6 +1,7 @@
 //! The PRs tab: `bearclaw prs` as a kanban — one lane per column, one card per PR.
 
 use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -14,6 +15,7 @@ use super::loader::Loader;
 use super::pager::wrap;
 use super::{CardStat, Outcome, View, common_key};
 use crate::cli::render::{ago, fit};
+use crate::core::discovery::Session;
 use crate::core::prs::{self, Column, Mode, Pr, Rotting, View as PrView};
 use crate::core::tbpr;
 use crate::core::tools::open_url;
@@ -35,12 +37,39 @@ const LANE_MIN: u16 = 26;
 const CARD_H: u16 = 6;
 /// The `m` menu on the selected card: each item's key (it works with the menu closed too) and
 /// what it does.
-const MENU: [(char, &str); 4] = [
+const MENU: [(char, &str); 5] = [
     ('R', "code review in a new session"),
+    ('g', "go to the review session"),
     ('o', "open in the browser"),
     ('t', "open the Productive task"),
     ('c', "copy the URL"),
 ];
+/// How long a footer note stays up.
+const NOTE: Duration = Duration::from_secs(8);
+/// A started review that hasn't shown up in the session list after this long stops saying
+/// "starting" (it most likely died on launch).
+const START_GRACE: Duration = Duration::from_secs(120);
+
+/// The review session of a PR: started by `R` as `claude -n review-<repo>-<N>`, found again
+/// by that name in the session list.
+fn review_name(p: &Pr) -> String {
+    format!("review-{}-{}", p.repo, p.number)
+}
+
+/// Start a review session in the background: in the directory every session starts in, named
+/// `name`, with `prompt` first. Its tmux session, or why not.
+fn start_review(prompt: &str, name: &str) -> Result<String, String> {
+    let dir = crate::core::tools::expand_tilde(&crate::tui::watch::default_session_dir());
+    crate::tui::watch::start_claude(&dir, Some(prompt), Some(name))
+}
+
+/// What a card's bottom edge says about the PR's review session.
+enum Review<'a> {
+    /// Live: its session id and status.
+    Live(&'a str, &'a str),
+    Starting,
+    Failed(&'a str),
+}
 
 /// One kanban lane: its title, column, the PRs it shows (indices into `prs`) and how many
 /// drafts the draft filter hides from it.
@@ -113,6 +142,19 @@ pub struct PrsView {
     pub(crate) review_prompt: Option<String>,
     /// The `m` menu is open, with this item highlighted.
     menu: Option<usize>,
+    /// Starts a review session (first prompt, name) → its tmux session. Swapped out in tests,
+    /// which must not start Claude.
+    pub(crate) starter: fn(&str, &str) -> Result<String, String>,
+    /// Review sessions being started, by name.
+    starting: HashMap<String, Receiver<Result<String, String>>>,
+    /// How the last start per name went, and when — until its session shows up.
+    started: HashMap<String, (Result<String, String>, Instant)>,
+    /// The live review sessions by name: (session id, status).
+    reviews: HashMap<String, (String, String)>,
+    /// A message for the footer, and when it was set.
+    note: Option<(String, Instant)>,
+    /// Where each card was last drawn, with its index into `prs` — for clicks.
+    hits: Vec<(Rect, usize)>,
 }
 
 impl Default for PrsView {
@@ -160,6 +202,100 @@ impl PrsView {
             watch_until: None,
             review_prompt: None,
             menu: None,
+            starter: start_review,
+            starting: HashMap::new(),
+            started: HashMap::new(),
+            reviews: HashMap::new(),
+            note: None,
+            hits: Vec::new(),
+        }
+    }
+
+    /// Put `msg` in the footer for a few seconds.
+    fn say(&mut self, msg: impl Into<String>) {
+        self.note = Some((msg.into(), Instant::now()));
+    }
+
+    /// What there is to show about `p`'s review session.
+    fn review(&self, p: &Pr) -> Option<Review<'_>> {
+        let name = review_name(p);
+        if let Some((id, status)) = self.reviews.get(&name) {
+            return Some(Review::Live(id, status));
+        }
+        if self.starting.contains_key(&name) {
+            return Some(Review::Starting);
+        }
+        match self.started.get(&name) {
+            Some((Ok(_), at)) if at.elapsed() < START_GRACE => Some(Review::Starting),
+            Some((Err(e), _)) => Some(Review::Failed(e)),
+            _ => None,
+        }
+    }
+
+    /// Start `p`'s review session in the background, unless it is running or on its way.
+    fn start_review(&mut self) {
+        let Some(p) = self.selected_pr() else {
+            self.say("no pull request selected");
+            return;
+        };
+        let name = review_name(p);
+        match self.review(p) {
+            Some(Review::Live(..)) => {
+                self.say(format!("{name} is already running — g opens it"));
+                return;
+            }
+            Some(Review::Starting) => return,
+            _ => {}
+        }
+        let title = p.title.replace(['\n', '\r'], " ");
+        let pr_line = format!(
+            "Pull request {}/{}#{} \"{title}\": {}.",
+            p.owner, p.repo, p.number, p.url
+        );
+        let ask = self
+            .review_prompt
+            .get_or_insert_with(|| prs::Settings::load().review_prompt);
+        let prompt = format!("{pr_line} {ask}");
+        let (tx, rx) = channel();
+        let (start, n) = (self.starter, name.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(start(&prompt, &n));
+        });
+        self.started.remove(&name);
+        self.starting.insert(name.clone(), rx);
+        self.say(format!("starting {name} in the background…"));
+    }
+
+    /// Take the starts that finished.
+    fn poll_starts(&mut self) {
+        let mut done = Vec::new();
+        for (name, rx) in &self.starting {
+            match rx.try_recv() {
+                Ok(r) => done.push((name.clone(), r)),
+                Err(TryRecvError::Disconnected) => {
+                    done.push((name.clone(), Err("the start crashed".into())))
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        for (name, r) in done {
+            self.starting.remove(&name);
+            self.say(match &r {
+                Ok(_) => format!("started {name} — g opens it"),
+                Err(e) => format!("{name}: {e}"),
+            });
+            self.started.insert(name, (r, Instant::now()));
+        }
+    }
+
+    /// Select the card of `prs()[i]`, in whichever lane shows it.
+    fn select(&mut self, i: usize) {
+        for (n, lane) in self.lanes().into_iter().enumerate() {
+            if let Some(at) = lane.idx.iter().position(|&x| x == i) {
+                self.lane = n;
+                self.card.insert(lane.column, at);
+                return;
+            }
         }
     }
 
@@ -243,21 +379,22 @@ impl PrsView {
     fn act(&mut self, c: char) -> Outcome {
         match c {
             'R' => {
-                let Some(p) = self.selected_pr() else {
-                    return Outcome::Log("no pull request selected".into());
-                };
-                let title = p.title.replace(['\n', '\r'], " ");
-                let pr_line = format!(
-                    "Pull request {}/{}#{} \"{title}\": {}.",
-                    p.owner, p.repo, p.number, p.url
-                );
-                let name = format!("review-{}-{}", p.repo, p.number);
-                let ask = self
-                    .review_prompt
-                    .get_or_insert_with(|| prs::Settings::load().review_prompt);
-                Outcome::SpawnNamed {
-                    prompt: format!("{pr_line} {ask}"),
-                    name,
+                self.start_review();
+                Outcome::None
+            }
+            'g' => {
+                let live = self.selected_pr().and_then(|p| match self.review(p) {
+                    Some(Review::Live(id, _)) => Some(id.to_string()),
+                    _ => None,
+                });
+                match live {
+                    Some(id) => Outcome::Session(id),
+                    None => {
+                        if self.selected_pr().is_some() {
+                            self.say("no review session for this PR yet — R starts one");
+                        }
+                        Outcome::None
+                    }
                 }
             }
             'o' => {
@@ -437,7 +574,7 @@ impl PrsView {
         lane: &Lane,
         selected_lane: bool,
         (more_left, more_right): (bool, bool),
-    ) {
+    ) -> Vec<(Rect, usize)> {
         let (col, idx) = (&lane.column, &lane.idx);
         let left = if more_left { "‹ " } else { "" };
         let right = if more_right { " ›" } else { "" };
@@ -462,8 +599,9 @@ impl PrsView {
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
+        let mut hits = Vec::new();
         if inner.height == 0 || inner.width == 0 {
-            return;
+            return hits;
         }
         if idx.is_empty() {
             f.render_widget(
@@ -473,7 +611,7 @@ impl PrsView {
                 )),
                 inner,
             );
-            return;
+            return hits;
         }
         let at = self.card.get(col).copied().unwrap_or(0).min(idx.len() - 1);
         // Leave a row for "+N more ↓" when the cards don't all fit.
@@ -491,8 +629,9 @@ impl PrsView {
                 break;
             }
             let selected = selected_lane && n == at;
-            let (lines, style) = Self::card(&self.prs()[i], selected, inner.width);
-            let card = Block::default()
+            let p = &self.prs()[i];
+            let (lines, style) = Self::card(p, selected, inner.width);
+            let mut card = Block::default()
                 .borders(Borders::ALL)
                 .border_type(if selected {
                     BorderType::Thick
@@ -500,10 +639,20 @@ impl PrsView {
                     BorderType::Rounded
                 })
                 .border_style(style);
-            f.render_widget(
-                Paragraph::new(lines).block(card),
-                Rect::new(inner.x, y, inner.width, h),
-            );
+            // The bottom edge links the PR's review session (`g`, or a click on it).
+            if let Some(r) = self.review(p) {
+                let (text, color) = match r {
+                    Review::Live(_, status) => (format!(" ⧉ review · {status} "), Color::Cyan),
+                    Review::Starting => (" ⧉ starting review… ".to_string(), Color::Yellow),
+                    Review::Failed(e) => (format!(" ✕ review failed: {e} "), Color::Red),
+                };
+                let room = inner.width.saturating_sub(2) as usize;
+                card =
+                    card.title_bottom(Line::styled(fit(&text, room), Style::default().fg(color)));
+            }
+            let rect = Rect::new(inner.x, y, inner.width, h);
+            f.render_widget(Paragraph::new(lines).block(card), rect);
+            hits.push((rect, i));
             y += h;
         }
         let below = idx.len().saturating_sub(offset + shown);
@@ -516,6 +665,7 @@ impl PrsView {
                 Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
             );
         }
+        hits
     }
 }
 
@@ -527,6 +677,7 @@ impl View for PrsView {
     }
 
     fn tick(&mut self) {
+        self.poll_starts();
         if self.load.poll() {
             self.lane = self.lane.min(self.lanes().len().saturating_sub(1));
         }
@@ -539,6 +690,43 @@ impl View for PrsView {
 
     fn refresh(&mut self) {
         self.fetch(Mode::Refresh);
+    }
+
+    fn sessions(&mut self, rows: &[Session]) {
+        self.reviews = rows
+            .iter()
+            .filter_map(|r| {
+                let id = r.session_id.clone()?;
+                let name = [r.name.as_deref(), r.tmux_session.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .find(|n| n.starts_with("review-"))?;
+                Some((name.to_string(), (id, r.status.clone())))
+            })
+            .collect();
+        let live = &self.reviews;
+        self.started.retain(|name, _| !live.contains_key(name));
+    }
+
+    fn click(&mut self, col: u16, row: u16) -> Outcome {
+        if self.menu.take().is_some() {
+            return Outcome::None;
+        }
+        let hit =
+            self.hits.iter().copied().find(|(r, _)| {
+                col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+            });
+        let Some((rect, i)) = hit else {
+            return Outcome::None;
+        };
+        self.select(i);
+        // The bottom edge is the review session's link.
+        if row == rect.y + rect.height - 1
+            && let Some(Review::Live(id, _)) = self.review(&self.prs()[i])
+        {
+            return Outcome::Session(id.to_string());
+        }
+        Outcome::None
     }
 
     fn card_stat(&self, s: &mut CardStat) {
@@ -572,14 +760,21 @@ impl View for PrsView {
         if self.load.loading {
             title.push_str("· loading… ");
         }
+        // A fresh note takes the footer's place; the keys come back after a few seconds.
+        let footer = match &self.note {
+            Some((msg, at)) if at.elapsed() < NOTE => {
+                Line::styled(format!(" {msg} "), Style::default().fg(Color::Yellow))
+            }
+            _ => Line::styled(
+                " ←/→ lane · ↑/↓ card · ⏎ open · R review · g go to review · m menu · t task · c copy · D drafts · A waiting on author · r refresh ",
+                Style::default().fg(Color::DarkGray),
+            ),
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
-            .title_bottom(Line::styled(
-                " ←/→ lane · ↑/↓ card · ⏎ open · R review · m menu · t task · c copy · D drafts · A waiting on author · r refresh ",
-                Style::default().fg(Color::DarkGray),
-            ));
+            .title_bottom(footer);
         let inner = block.inner(area);
         f.render_widget(block, area);
         if inner.width == 0 || inner.height == 0 {
@@ -608,6 +803,7 @@ impl View for PrsView {
         }
         self.first_lane = self.first_lane.min(lanes.len() - visible);
         let lane_w = inner.width / visible as u16;
+        let mut hits = Vec::new();
         for (n, lane) in lanes.iter().enumerate().skip(self.first_lane).take(visible) {
             let slot = (n - self.first_lane) as u16;
             let x = inner.x + slot * lane_w;
@@ -621,14 +817,15 @@ impl View for PrsView {
                 slot == 0 && self.first_lane > 0,
                 slot as usize == visible - 1 && self.first_lane + visible < lanes.len(),
             );
-            self.draw_lane(
+            hits.extend(self.draw_lane(
                 f,
                 Rect::new(x, inner.y, w, inner.height),
                 lane,
                 n == self.lane,
                 edges,
-            );
+            ));
         }
+        self.hits = hits;
         if let Some(at) = self.menu {
             self.draw_menu(f, inner, at);
         }
@@ -653,7 +850,7 @@ impl View for PrsView {
             KeyCode::Up | KeyCode::Char('k') => self.step_card(false),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Enter => return self.act('o'),
-            KeyCode::Char(c @ ('R' | 'o' | 't' | 'c')) => return self.act(c),
+            KeyCode::Char(c @ ('R' | 'g' | 'o' | 't' | 'c')) => return self.act(c),
             KeyCode::Char('m') => {
                 if self.selected_pr().is_some() {
                     self.menu = Some(0);
@@ -815,38 +1012,158 @@ mod tests {
         );
     }
 
+    static STARTED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+    fn fake_start(prompt: &str, name: &str) -> Result<String, String> {
+        STARTED
+            .lock()
+            .unwrap()
+            .push((prompt.to_string(), name.to_string()));
+        Ok(name.to_string())
+    }
+    fn failing_start(_prompt: &str, _name: &str) -> Result<String, String> {
+        Err("tmux: no server".into())
+    }
+
     fn review_view(prs: Vec<Pr>) -> PrsView {
         let mut v = view_with(prs);
         v.opener = record;
+        v.starter = fake_start;
         v.review_prompt = Some("Review it.".into());
         v
     }
 
+    fn shift_r(v: &mut PrsView) -> Outcome {
+        v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT))
+    }
+
+    /// Tick until no start is in flight.
+    fn settle(v: &mut PrsView) {
+        let until = Instant::now() + Duration::from_secs(2);
+        while !v.starting.is_empty() && Instant::now() < until {
+            v.tick();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(v.starting.is_empty(), "the start settled");
+    }
+
+    fn review_row(name: &str, id: &str) -> crate::core::discovery::Session {
+        crate::core::discovery::Session {
+            session_id: Some(id.into()),
+            name: Some(name.into()),
+            status: "busy".into(),
+            ..Default::default()
+        }
+    }
+
     #[test]
-    fn shift_r_starts_a_review_session_on_the_selected_pr() {
+    fn shift_r_starts_a_review_in_the_background_and_stays_on_the_tab() {
         let mut v = review_view(vec![pr(Column::WaitingOnMe, 2504, "credit notes")]);
         // "Waiting on me" is the fourth lane.
         for _ in 0..3 {
             key(&mut v, KeyCode::Right);
         }
-        assert_eq!(
-            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Outcome::SpawnNamed {
-                prompt: "Pull request acme/api#2504 \"credit notes\": \
-                         https://github.com/acme/api/pull/2504. Review it."
+        assert_eq!(shift_r(&mut v), Outcome::None, "no jump to Sessions");
+        assert!(screen(&mut v, 160, 20).contains("starting"));
+        settle(&mut v);
+        assert!(
+            STARTED.lock().unwrap().contains(&(
+                "Pull request acme/api#2504 \"credit notes\": \
+             https://github.com/acme/api/pull/2504. Review it."
                     .into(),
-                name: "review-api-2504".into(),
-            }
+                "review-api-2504".into()
+            ))
+        );
+        // Until the session shows up in the list, the card says it is on its way.
+        assert!(screen(&mut v, 160, 20).contains("starting"));
+    }
+
+    #[test]
+    fn a_second_pr_starts_its_own_review() {
+        let mut v = review_view(vec![
+            pr(Column::DraftMine, 31, "one"),
+            pr(Column::DraftMine, 32, "two"),
+        ]);
+        shift_r(&mut v);
+        key(&mut v, KeyCode::Down);
+        shift_r(&mut v);
+        settle(&mut v);
+        let started = STARTED.lock().unwrap();
+        for name in ["review-api-31", "review-api-32"] {
+            assert!(
+                started.iter().any(|(_, n)| n == name),
+                "{name}: {started:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_live_review_shows_on_its_card_and_g_or_a_click_opens_it() {
+        let mut v = review_view(vec![pr(Column::DraftMine, 40, "reviewed")]);
+        v.sessions(&[review_row("review-api-40", "sess-40")]);
+        let s = screen(&mut v, 160, 20);
+        assert!(s.contains("⧉ review"), "{s}");
+        assert_eq!(
+            v.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            Outcome::Session("sess-40".into())
+        );
+        // A click on the card's bottom edge (the link) opens the session; elsewhere it selects.
+        let (rect, _) = v.hits[0];
+        assert_eq!(v.click(rect.x + 3, rect.y + 1), Outcome::None);
+        assert_eq!(
+            v.click(rect.x + 3, rect.y + rect.height - 1),
+            Outcome::Session("sess-40".into())
+        );
+        // Already running: R does not start another one.
+        assert_eq!(shift_r(&mut v), Outcome::None);
+        assert!(v.starting.is_empty());
+        assert!(screen(&mut v, 160, 20).contains("already running"));
+    }
+
+    #[test]
+    fn a_click_selects_the_card_under_it() {
+        let mut v = review_view(vec![
+            pr(Column::DraftMine, 51, "first"),
+            pr(Column::WaitingOnMe, 52, "other lane"),
+        ]);
+        screen(&mut v, 160, 20);
+        let (rect, _) = *v
+            .hits
+            .iter()
+            .find(|(_, i)| v.prs()[*i].number == 52)
+            .unwrap();
+        v.click(rect.x + 2, rect.y + 2);
+        assert_eq!(v.selected_pr().map(|p| p.number), Some(52));
+    }
+
+    #[test]
+    fn g_without_a_review_says_so() {
+        let mut v = review_view(vec![pr(Column::DraftMine, 60, "none")]);
+        assert_eq!(
+            v.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            Outcome::None
+        );
+        assert!(screen(&mut v, 160, 20).contains("no review session"));
+    }
+
+    #[test]
+    fn a_failed_start_shows_on_the_card() {
+        let mut v = review_view(vec![pr(Column::DraftMine, 70, "broken")]);
+        v.starter = failing_start;
+        shift_r(&mut v);
+        settle(&mut v);
+        let s = screen(&mut v, 160, 20);
+        assert!(
+            s.contains("review failed") && s.contains("no server"),
+            "{s}"
         );
     }
 
     #[test]
     fn shift_r_on_an_empty_lane_only_says_so() {
         let mut v = review_view(vec![]);
-        assert!(matches!(
-            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Outcome::Log(_)
-        ));
+        assert_eq!(shift_r(&mut v), Outcome::None);
+        assert!(v.starting.is_empty());
+        assert!(screen(&mut v, 160, 20).contains("no pull request selected"));
     }
 
     #[test]
@@ -859,6 +1176,7 @@ mod tests {
             "open in the browser",
             "open the Productive task",
             "copy the URL",
+            "go to the review session",
         ] {
             assert!(s.contains(item), "{item} missing:\n{s}");
         }
@@ -888,11 +1206,16 @@ mod tests {
         );
         assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
         key(&mut v, KeyCode::Char('m'));
-        assert!(matches!(
-            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Outcome::SpawnNamed { .. }
-        ));
+        assert_eq!(shift_r(&mut v), Outcome::None);
         assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
+        settle(&mut v);
+        assert!(
+            STARTED
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, n)| n == "review-api-8")
+        );
     }
 
     #[test]

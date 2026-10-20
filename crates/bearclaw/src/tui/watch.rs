@@ -942,8 +942,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             last_poll = Some(Instant::now());
             dash.dormant = crate::core::snapshot::dormant_count();
             dash.notes = load_notes(&rows);
-            let live: Vec<String> = rows.iter().filter_map(|r| r.session_id.clone()).collect();
-            tabs.live(&live);
+            tabs.live(&rows);
             // New sessions get a title, and a session whose first prompt has
             // landed since gets a better one. A no-op once the bearclaw is titled.
             naming.autotitle(&rows);
@@ -1156,7 +1155,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         let dir = crate::core::tools::expand_tilde(dir.trim());
                         log.insert(0, Ev::now("→", format!("starting a session in {dir}…")));
                         log.truncate(EVENT_CAP);
-                        dash.spawning = Some(spawn_in_tmux(dir, dash.new_prompt.take(), None));
+                        dash.spawning = Some(spawn_in_tmux(dir, dash.new_prompt.take()));
                     }
                 }
             }
@@ -1226,6 +1225,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     view.paste(&text);
                     Outcome::None
                 }
+                Event::Mouse(m) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
+                    view.click(m.column, m.row)
+                }
                 _ => Outcome::None,
             };
             match outcome {
@@ -1260,14 +1262,6 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     input.buf = default_session_dir();
                     dash.new_session = Some(input);
                     dash.new_prompt = Some(prompt);
-                }
-                // Where every session starts, so there is nothing to ask.
-                Outcome::SpawnNamed { prompt, name } => {
-                    tabs.switch(Tab::Sessions);
-                    let dir = crate::core::tools::expand_tilde(&default_session_dir());
-                    log.insert(0, Ev::now("→", format!("starting {name} in {dir}…")));
-                    log.truncate(EVENT_CAP);
-                    dash.spawning = Some(spawn_in_tmux(dir, Some(prompt), Some(name)));
                 }
                 Outcome::Edit(path) => match Editor::open(path) {
                     Ok(e) => dash.editor = Some(e),
@@ -1708,7 +1702,7 @@ fn open_tmux(ts: &str, id: Option<String>, dash: &mut Dash, log: &mut Vec<Ev>) -
 }
 
 /// Where `c` offers to start: this host's first spawn dir, else the current directory.
-fn default_session_dir() -> String {
+pub(crate) fn default_session_dir() -> String {
     let cfg = crate::core::config::get();
     cfg.spawn_dirs_for(&cfg.self_name())
         .into_iter()
@@ -1724,37 +1718,49 @@ fn default_session_dir() -> String {
 }
 
 /// Start Claude (the configured launcher, with `prompt` as its first one) in a new tmux
-/// session in `dir` — named `name`, else after the directory — off the UI thread.
+/// session in `dir`, off the UI thread.
 fn spawn_in_tmux(
     dir: String,
     prompt: Option<String>,
-    name: Option<String>,
 ) -> Receiver<std::result::Result<String, String>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
-        use crate::core::harness::Harness;
-        let result = if !std::path::Path::new(&dir).is_dir() {
-            Err(format!("no such directory: {dir}"))
-        } else {
-            backend::spawn_tagged(
-                crate::core::discovery::Backend::Tmux,
-                &dir,
-                prompt
-                    .as_deref()
-                    .map_or(backend::Prompt::None, backend::Prompt::Inline),
-                name.as_deref(),
-                None,
-                false,
-                &crate::core::tools::without_model_env(&Harness::Claude.command()),
-                Harness::Claude,
-                None,
-            )
-            .map_err(|e| e.to_string())
-            .and_then(|(_, ts)| ts.ok_or_else(|| "tmux gave no session name".to_string()))
-        };
-        let _ = tx.send(result);
+        let _ = tx.send(start_claude(&dir, prompt.as_deref(), None));
     });
     rx
+}
+
+/// Start Claude (the configured launcher) in a new tmux session in `dir`, with `prompt` as its
+/// first one. `name` names the Claude session and, unless that tmux session is taken (a
+/// leftover shell, say), the tmux session too. Returns the tmux session.
+pub(crate) fn start_claude(
+    dir: &str,
+    prompt: Option<&str>,
+    name: Option<&str>,
+) -> std::result::Result<String, String> {
+    use crate::core::harness::Harness;
+    if !std::path::Path::new(dir).is_dir() {
+        return Err(format!("no such directory: {dir}"));
+    }
+    let tmux_session = name.map(|n| {
+        backend::unique_tmux_name(
+            &crate::core::tmux::sanitize_name(n),
+            &backend::tmux_session_names(),
+        )
+    });
+    backend::spawn_tagged(
+        crate::core::discovery::Backend::Tmux,
+        dir,
+        prompt.map_or(backend::Prompt::None, backend::Prompt::Inline),
+        name,
+        tmux_session.as_deref(),
+        false,
+        &crate::core::tools::without_model_env(&Harness::Claude.command()),
+        Harness::Claude,
+        None,
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|(_, ts)| ts.ok_or_else(|| "tmux gave no session name".to_string()))
 }
 
 /// Row 0 is the tab bar; the rest is the Sessions dashboard or the active tab's view.
