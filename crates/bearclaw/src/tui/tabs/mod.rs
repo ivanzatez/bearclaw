@@ -189,10 +189,9 @@ pub enum Outcome {
     Session(String),
     /// Start a new Claude session with this first prompt and open it.
     Spawn(String),
-    /// Check the pull request at `url` out in a worktree, start a Claude session named `name`
-    /// there (its first prompt: which PR and where, then `prompt`) and open it.
-    SpawnPr {
-        url: String,
+    /// Start a new Claude session named `name` with this first prompt in the usual directory
+    /// (the first spawn dir) without asking, and open it.
+    SpawnNamed {
         prompt: String,
         name: String,
     },

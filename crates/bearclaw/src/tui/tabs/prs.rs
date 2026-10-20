@@ -246,12 +246,19 @@ impl PrsView {
                 let Some(p) = self.selected_pr() else {
                     return Outcome::Log("no pull request selected".into());
                 };
-                let (url, name) = (p.url.clone(), format!("review-{}-{}", p.repo, p.number));
-                let prompt = self
+                let title = p.title.replace(['\n', '\r'], " ");
+                let pr_line = format!(
+                    "Pull request {}/{}#{} \"{title}\": {}.",
+                    p.owner, p.repo, p.number, p.url
+                );
+                let name = format!("review-{}-{}", p.repo, p.number);
+                let ask = self
                     .review_prompt
-                    .get_or_insert_with(|| prs::Settings::load().review_prompt)
-                    .clone();
-                Outcome::SpawnPr { url, prompt, name }
+                    .get_or_insert_with(|| prs::Settings::load().review_prompt);
+                Outcome::SpawnNamed {
+                    prompt: format!("{pr_line} {ask}"),
+                    name,
+                }
             }
             'o' => {
                 if let Some(url) = self.selected_pr().map(|p| p.url.clone()) {
@@ -824,9 +831,10 @@ mod tests {
         }
         assert_eq!(
             v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Outcome::SpawnPr {
-                url: "https://github.com/acme/api/pull/2504".into(),
-                prompt: "Review it.".into(),
+            Outcome::SpawnNamed {
+                prompt: "Pull request acme/api#2504 \"credit notes\": \
+                         https://github.com/acme/api/pull/2504. Review it."
+                    .into(),
                 name: "review-api-2504".into(),
             }
         );
@@ -882,7 +890,7 @@ mod tests {
         key(&mut v, KeyCode::Char('m'));
         assert!(matches!(
             v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Outcome::SpawnPr { .. }
+            Outcome::SpawnNamed { .. }
         ));
         assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
     }
