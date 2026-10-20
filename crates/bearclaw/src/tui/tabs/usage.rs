@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, LineGauge, Paragraph, Wrap};
 
 use super::loader::Loader;
-use super::{Outcome, View, common_key};
+use super::{CardStat, Outcome, View, common_key};
 use crate::cli::render::fit;
 use crate::cli::usage::resets;
 use crate::core::discovery::claude_home;
@@ -62,6 +62,21 @@ impl View for UsageView {
 
     fn refresh(&mut self) {
         self.fetch(true);
+    }
+
+    fn card_stat(&self, s: &mut CardStat) {
+        if let Some(u) = &self.load.data {
+            s.usage_session = u
+                .limits
+                .iter()
+                .find(|l| l.group == "session")
+                .map(|l| l.percent);
+            s.usage_week = u
+                .limits
+                .iter()
+                .find(|l| l.kind == "weekly_all")
+                .map(|l| l.percent);
+        }
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {

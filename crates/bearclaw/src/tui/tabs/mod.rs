@@ -145,31 +145,6 @@ pub fn tab_bar(
     (Line::default(), Vec::new())
 }
 
-/// Columns the paw logo takes on the bar: seven half-block cells plus a trailing space.
-pub const PAW_LOGO_WIDTH: u16 = 8;
-
-/// A tiny pixel-art druid paw for the left of the bar — four white claws over a brown pad,
-/// one text row tall (the bar's whole height), in truecolor half-blocks.
-pub fn paw_logo() -> Vec<Span<'static>> {
-    let claw = Color::Rgb(0xf3, 0xe9, 0xd4);
-    let pad = Color::Rgb(0x8a, 0x52, 0x2c);
-    // `▀` fills the upper pixel with `fg` and the lower with `bg`; `▄` fills the lower with
-    // `fg` and leaves the upper as the terminal background, so the gaps between claws stay
-    // clear instead of showing a dark block.
-    let clawed = Span::styled("▀", Style::default().fg(claw).bg(pad)); // claw over pad
-    let gap = Span::styled("▄", Style::default().fg(pad)); // pad only, a gap above it
-    vec![
-        clawed.clone(),
-        gap.clone(),
-        clawed.clone(),
-        gap.clone(),
-        clawed.clone(),
-        gap,
-        clawed,
-        Span::raw(" "),
-    ]
-}
-
 /// The refresh button at the right end of the bar, when it fits after `used` columns of tabs
 /// (with a gap): its label and first column. Shortens to the icon alone before it disappears.
 pub fn refresh_button(width: u16, used: u16) -> Option<(&'static str, u16)> {
@@ -216,6 +191,16 @@ pub enum Outcome {
     Spawn(String),
 }
 
+/// The Claw tab's character card reads a few numbers it doesn't own from the tabs that do.
+/// Each field stays `None` until that tab's data has loaded, so the card can show a placeholder.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CardStat {
+    pub pr_total: Option<usize>,
+    pub pr_waiting: Option<usize>,
+    pub usage_session: Option<f64>,
+    pub usage_week: Option<f64>,
+}
+
 pub trait View {
     /// The tab just became active: start a fetch if its data is stale.
     fn on_show(&mut self);
@@ -233,6 +218,8 @@ pub trait View {
     fn typing(&self) -> bool {
         false
     }
+    /// Contribute this tab's cached numbers to the Claw character card, when it has any.
+    fn card_stat(&self, _s: &mut CardStat) {}
 }
 
 /// The keys every tab shares at its top level (no input, no pager open).
@@ -332,19 +319,6 @@ mod tests {
         let mut tabs = Tabs::new();
         assert!(tabs.view(Tab::Claw).is_none() && tabs.view(Tab::Sessions).is_none());
         assert!(tabs.view(Tab::Prs).is_some() && tabs.view(Tab::Settings).is_some());
-    }
-
-    #[test]
-    fn the_paw_logo_is_exactly_its_advertised_width() {
-        let logo = paw_logo();
-        let w: usize = logo.iter().map(|s| width_of(s.content.as_ref())).sum();
-        assert_eq!(
-            w, PAW_LOGO_WIDTH as usize,
-            "logo width must match the reserve"
-        );
-        // Four claws over the pad: `▀` is a claw cell, `▄` a gap above the pad.
-        let s: String = logo.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(s.matches('▀').count(), 4, "{s}");
     }
 
     #[test]

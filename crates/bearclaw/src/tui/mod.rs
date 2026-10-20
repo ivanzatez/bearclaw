@@ -1,5 +1,7 @@
 //! The `watch` dashboard (ratatui) and its notifications.
 
+pub mod claw_card;
+pub mod claw_sprite;
 pub mod dash;
 pub mod notify;
 pub mod tabs;

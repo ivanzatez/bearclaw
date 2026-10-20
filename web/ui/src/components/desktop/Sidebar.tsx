@@ -75,8 +75,8 @@ export function Sidebar({ list, now, cursorKey, selectedKey, searchRef, onSearch
       <div data-tauri-drag-region className="shrink-0 space-y-2 border-b px-3 pt-3 pb-2.5">
         {/* The desktop app's traffic lights sit over this row (see index.css → Desktop app). */}
         <div data-tauri-drag-region="deep" className="titlebar-lead flex min-h-8 items-center gap-2 [--titlebar-offset:0.75rem]">
-          {/* Pixel-art druid paw logomark; favicon.svg is the rounded square, drawn 1:1 with its 28-unit grid. */}
-          <img src="/favicon.svg" alt="" aria-hidden="true" draggable={false} className="size-6 shrink-0 select-none" />
+          {/* Pixel-art druid claw logomark (favicon.svg: the gold-framed WoW class icon). */}
+          <img src="/favicon.svg" alt="" aria-hidden="true" draggable={false} className="size-7 shrink-0 select-none" />
           <h1 className="text-lg font-bold tracking-tight">Bearclaw</h1>
           {bearclaw ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums" aria-label="Status summary">

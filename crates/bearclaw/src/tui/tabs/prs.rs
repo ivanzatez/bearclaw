@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 
 use super::loader::Loader;
 use super::pager::wrap;
-use super::{Outcome, View, common_key};
+use super::{CardStat, Outcome, View, common_key};
 use crate::cli::render::{ago, fit};
 use crate::core::prs::{self, Column, Mode, Pr, Rotting, View as PrView};
 use crate::core::tbpr;
@@ -392,6 +392,18 @@ impl View for PrsView {
 
     fn refresh(&mut self) {
         self.fetch(Mode::Refresh);
+    }
+
+    fn card_stat(&self, s: &mut CardStat) {
+        if let Some(v) = &self.load.data {
+            let prs = &v.snap.prs;
+            s.pr_total = Some(prs.len());
+            s.pr_waiting = Some(
+                prs.iter()
+                    .filter(|p| p.column == Column::WaitingOnMe)
+                    .count(),
+            );
+        }
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {

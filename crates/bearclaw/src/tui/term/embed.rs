@@ -19,6 +19,12 @@ pub struct Embedded {
     rx: Receiver<Vec<u8>>,
     /// The reader hit EOF: the client (or its session) is gone.
     ended: bool,
+    /// The tmux session name, when attached to one — lets [`pin`](Embedded::pin) drive its window
+    /// size directly rather than leaving it to the clients.
+    target: Option<String>,
+    /// Pin the tmux *window* to this embed's size (window-size manual + resize-window on every
+    /// resize), so a second client attached elsewhere can't hold it at a width that clips us.
+    pinned: bool,
 }
 
 fn size(rows: u16, cols: u16) -> PtySize {
@@ -43,7 +49,9 @@ impl Embedded {
         }
         let mut cmd = CommandBuilder::new(crate::core::tools::tmux());
         cmd.args(["-u", "attach-session", "-t", &format!("={target}")]);
-        Self::attach_cmd(cmd, rows, cols)
+        let mut e = Self::attach_cmd(cmd, rows, cols)?;
+        e.target = Some(target.to_string());
+        Ok(e)
     }
 
     /// Run `cmd` (a tmux client) in a new PTY of `rows`×`cols`.
@@ -80,7 +88,46 @@ impl Embedded {
             child,
             rx,
             ended: false,
+            target: None,
+            pinned: false,
         })
+    }
+
+    /// Make this embed authoritative over its tmux window's size. Without it, tmux sizes a window
+    /// to its clients (default `window-size latest`); a second client attached at another size can
+    /// then leave the window wider than the pane we draw into, clipping it. We instead set the
+    /// session to `window-size manual` and resize the window ourselves on every [`resize`].
+    pub fn pin(&mut self) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+        self.pinned = true;
+        let t = format!("={target}:");
+        let _ = tmux_cmd()
+            .args(["set-option", "-t", &t, "window-size", "manual"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let (r, c) = self.parser.screen().size();
+        self.resize_window(r, c);
+    }
+
+    /// `resize-window` the pinned session to `rows`×`cols` (best effort).
+    fn resize_window(&self, rows: u16, cols: u16) {
+        let Some(target) = &self.target else { return };
+        let _ = tmux_cmd()
+            .args([
+                "resize-window",
+                "-t",
+                &format!("={target}:"),
+                "-x",
+                &cols.max(1).to_string(),
+                "-y",
+                &rows.max(1).to_string(),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     /// Feed what the client printed into the emulator. True when the screen changed.
@@ -117,6 +164,10 @@ impl Embedded {
         }
         self.parser.set_size(rows.max(1), cols.max(1));
         let _ = self.master.resize(size(rows, cols));
+        // A pinned window won't follow the client on its own (window-size manual), so drive it.
+        if self.pinned {
+            self.resize_window(rows, cols);
+        }
     }
 
     pub fn alive(&mut self) -> bool {

@@ -36,6 +36,7 @@ use crate::core::backend;
 use crate::core::discovery::{Session, claude_home, discover, enrich_iterm_tabs, is_fixture};
 use crate::core::naming::{GenOpts, NameCache, NameJob, NameMsg, NamePool, NameSource, Purpose};
 use crate::error::{Error, Result};
+use crate::tui::claw_card;
 use crate::tui::dash::keys::{self, Action, RenameAction};
 use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
@@ -374,6 +375,9 @@ struct Dash {
     claw_starting: Option<Receiver<std::result::Result<String, String>>>,
     /// Why Claw could not start (`r` on its tab retries).
     claw_error: Option<String>,
+    /// The Claw character card's stats, rebuilt on a timer so the file reads behind it
+    /// (todo, brain) don't run every frame.
+    claw_card: Option<(Instant, claw_card::Stats)>,
     /// A new session being started in the background: its tmux session name, or why not.
     spawning: Option<Receiver<std::result::Result<String, String>>>,
 }
@@ -853,6 +857,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         claw: None,
         claw_starting: None,
         claw_error: None,
+        claw_card: None,
         spawning: None,
     };
     let mut tabs = Tabs::new();
@@ -970,10 +975,15 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             dash.claw_starting = None;
             let (cols, height) = crossterm::terminal::size().unwrap_or((80, 24));
             match result.and_then(|name| {
-                Embedded::attach(&name, height.saturating_sub(2), cols).map(|embed| Term {
-                    session: name,
-                    id: None,
-                    embed,
+                Embedded::attach(&name, height.saturating_sub(2), cols).map(|mut embed| {
+                    // Claw shares the pane with the character card; pin its window so it always
+                    // gets exactly the width we draw into, even if a second client is attached.
+                    embed.pin();
+                    Term {
+                        session: name,
+                        id: None,
+                        embed,
+                    }
                 })
             }) {
                 Ok(t) => dash.claw = Some(t),
@@ -1695,19 +1705,7 @@ fn draw_app(
     let [bar, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(f.area());
     let waiting = rows.iter().filter(|r| r.is_waiting()).count();
     let badge = (waiting > 0).then(|| format!("⏸{waiting}"));
-    // A pixel-art paw sits left of the tabs on a wide enough bar; a narrow pane gives the
-    // columns back so the tabs are never clipped for it (see `tabs::paw_logo`).
-    let logo = (bar.width >= 80).then(tabs::paw_logo);
-    let logo_w = logo.as_ref().map_or(0, |_| tabs::PAW_LOGO_WIDTH);
-    let (mut line, mut hits) = tabs::tab_bar(tabs.active, bar.width.saturating_sub(logo_w), badge);
-    if let Some(mut spans) = logo {
-        for h in hits.iter_mut() {
-            h.1 += logo_w;
-            h.2 += logo_w;
-        }
-        spans.extend(line.spans);
-        line = Line::from(spans);
-    }
+    let (line, hits) = tabs::tab_bar(tabs.active, bar.width, badge);
     let used = width_of(
         &line
             .spans
@@ -1736,6 +1734,37 @@ fn draw_app(
     }
     if tabs.active == Tab::Claw {
         dash.list_area = Rect::default();
+        // Keep the card's PRs/Usage numbers warming while the tab is up (both are stale-guarded).
+        for t in [Tab::Prs, Tab::Usage] {
+            if let Some(v) = tabs.view(t) {
+                v.on_show();
+            }
+        }
+        // A character card beside the terminal on a wide pane; a narrow one keeps all the room.
+        let term_body = if body.width >= claw_card::MIN_WIDTH {
+            let [card, rest] =
+                Layout::horizontal([Constraint::Length(claw_card::WIDTH), Constraint::Min(0)])
+                    .areas(body);
+            let stale = dash
+                .claw_card
+                .as_ref()
+                .is_none_or(|(at, _)| at.elapsed() >= Duration::from_secs(1));
+            if stale {
+                let mut stat = tabs::CardStat::default();
+                for t in [Tab::Prs, Tab::Usage] {
+                    if let Some(v) = tabs.view(t) {
+                        v.card_stat(&mut stat);
+                    }
+                }
+                dash.claw_card = Some((Instant::now(), claw_card::Stats::gather(rows, stat)));
+            }
+            if let Some((_, stats)) = &dash.claw_card {
+                claw_card::render(f, card, stats);
+            }
+            rest
+        } else {
+            body
+        };
         match dash.claw.as_mut() {
             Some(t) => {
                 let header = if t.embed.alive() {
@@ -1743,14 +1772,14 @@ fn draw_app(
                 } else {
                     " ✦ Claw ended — any key starts it again ".into()
                 };
-                dash.term_area = draw_term(f, body, t, header);
+                dash.term_area = draw_term(f, term_body, t, header);
             }
             None => {
                 let msg = match &dash.claw_error {
                     Some(e) => format!(" ✦ Claw couldn't start: {e} — r to retry"),
                     None => " ✦ starting Claw…".into(),
                 };
-                f.render_widget(Paragraph::new(msg).wrap(Wrap { trim: false }), body);
+                f.render_widget(Paragraph::new(msg).wrap(Wrap { trim: false }), term_body);
             }
         }
         return;
@@ -2379,6 +2408,7 @@ mod tests {
             claw: None,
             claw_starting: None,
             claw_error: None,
+            claw_card: None,
             spawning: None,
         }
     }
