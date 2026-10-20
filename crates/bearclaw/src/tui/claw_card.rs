@@ -141,7 +141,6 @@ pub fn render(f: &mut Frame, area: Rect, s: &Stats) {
         "─".repeat(13),
         Style::default().fg(DIM),
     )));
-    lines.push(info("Class", "Druid · Feral".into()));
     lines.push(info(
         "Sessions",
         format!("{} ({} busy, {} idle)", s.sessions, s.busy, s.idle),
