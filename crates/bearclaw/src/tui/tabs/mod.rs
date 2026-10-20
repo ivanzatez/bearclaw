@@ -189,12 +189,6 @@ pub enum Outcome {
     Session(String),
     /// Start a new Claude session with this first prompt and open it.
     Spawn(String),
-    /// Start a new Claude session named `name` with this first prompt in the usual directory
-    /// (the first spawn dir) without asking, and open it.
-    SpawnNamed {
-        prompt: String,
-        name: String,
-    },
 }
 
 /// The Claw tab's character card reads a few numbers it doesn't own from the tabs that do.
@@ -220,6 +214,12 @@ pub trait View {
     fn paste(&mut self, _text: &str) {}
     /// The session ids alive right now, after every poll.
     fn live(&mut self, _ids: &[String]) {}
+    /// The sessions alive right now, after every poll.
+    fn sessions(&mut self, _rows: &[crate::core::discovery::Session]) {}
+    /// A left click at (`col`, `row`) of the screen, inside this tab.
+    fn click(&mut self, _col: u16, _row: u16) -> Outcome {
+        Outcome::None
+    }
     /// A text input is open: every key is its, Tab and `q` included.
     fn typing(&self) -> bool {
         false
@@ -298,9 +298,11 @@ impl Tabs {
         }
     }
 
-    pub fn live(&mut self, ids: &[String]) {
+    pub fn live(&mut self, rows: &[crate::core::discovery::Session]) {
+        let ids: Vec<String> = rows.iter().filter_map(|r| r.session_id.clone()).collect();
         for (_, v) in &mut self.views {
-            v.live(ids);
+            v.live(&ids);
+            v.sessions(rows);
         }
     }
 
