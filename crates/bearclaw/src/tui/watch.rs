@@ -1261,6 +1261,16 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     dash.new_session = Some(input);
                     dash.new_prompt = Some(prompt);
                 }
+                // The PR picks the directory (its worktree), so there is nothing to ask.
+                Outcome::SpawnPr { url, prompt, name } => {
+                    tabs.switch(Tab::Sessions);
+                    log.insert(
+                        0,
+                        Ev::now("→", format!("checking out {url} and starting {name}…")),
+                    );
+                    log.truncate(EVENT_CAP);
+                    dash.spawning = Some(spawn_pr_in_tmux(url, prompt, name));
+                }
                 Outcome::Edit(path) => match Editor::open(path) {
                     Ok(e) => dash.editor = Some(e),
                     Err(e) => {
@@ -1723,29 +1733,66 @@ fn spawn_in_tmux(
 ) -> Receiver<std::result::Result<String, String>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
-        use crate::core::harness::Harness;
-        let result = if !std::path::Path::new(&dir).is_dir() {
-            Err(format!("no such directory: {dir}"))
-        } else {
-            backend::spawn_tagged(
-                crate::core::discovery::Backend::Tmux,
-                &dir,
-                prompt
-                    .as_deref()
-                    .map_or(backend::Prompt::None, backend::Prompt::Inline),
-                None,
-                None,
-                false,
-                &crate::core::tools::without_model_env(&Harness::Claude.command()),
-                Harness::Claude,
-                None,
-            )
-            .map_err(|e| e.to_string())
-            .and_then(|(_, ts)| ts.ok_or_else(|| "tmux gave no session name".to_string()))
-        };
+        let _ = tx.send(start_claude(&dir, prompt.as_deref(), None));
+    });
+    rx
+}
+
+/// Check the PR at `url` out in a worktree (`bearclaw pr checkout`), then start Claude there
+/// as `name` with the PR's context line and `prompt` as its first prompt — off the UI thread.
+fn spawn_pr_in_tmux(
+    url: String,
+    prompt: String,
+    name: String,
+) -> Receiver<std::result::Result<String, String>> {
+    use crate::core::{prs, repos, stack};
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let result = prs::PrRef::parse(&url)
+            .ok_or_else(|| format!("not a pull request: {url}"))
+            .and_then(|r| prs::head(&r).map_err(|e| e.to_string()))
+            .and_then(|head| {
+                prs::checkout(
+                    &prs::Settings::load(),
+                    &repos::Settings::load(),
+                    head,
+                    false,
+                )
+                .map_err(|e| e.to_string())
+            })
+            .and_then(|wt| {
+                let first = stack::prompt_after(&wt.context_line, &prompt);
+                start_claude(&wt.path, Some(&first), Some(&name))
+            });
         let _ = tx.send(result);
     });
     rx
+}
+
+/// Start Claude in a new tmux session in `dir` (named `name`, else after the directory) and
+/// return the tmux session.
+fn start_claude(
+    dir: &str,
+    prompt: Option<&str>,
+    name: Option<&str>,
+) -> std::result::Result<String, String> {
+    use crate::core::harness::Harness;
+    if !std::path::Path::new(dir).is_dir() {
+        return Err(format!("no such directory: {dir}"));
+    }
+    backend::spawn_tagged(
+        crate::core::discovery::Backend::Tmux,
+        dir,
+        prompt.map_or(backend::Prompt::None, backend::Prompt::Inline),
+        name,
+        None,
+        false,
+        &crate::core::tools::without_model_env(&Harness::Claude.command()),
+        Harness::Claude,
+        None,
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|(_, ts)| ts.ok_or_else(|| "tmux gave no session name".to_string()))
 }
 
 /// Row 0 is the tab bar; the rest is the Sessions dashboard or the active tab's view.

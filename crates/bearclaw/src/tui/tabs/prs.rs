@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
 use super::loader::Loader;
 use super::pager::wrap;
@@ -33,6 +33,14 @@ const ON_SCREEN: Duration = Duration::from_millis(750);
 const LANE_MIN: u16 = 26;
 /// Rows one card takes: border, two title lines, `repo#N`, meta, border.
 const CARD_H: u16 = 6;
+/// The `m` menu on the selected card: each item's key (it works with the menu closed too) and
+/// what it does.
+const MENU: [(char, &str); 4] = [
+    ('R', "code review in a new session"),
+    ('o', "open in the browser"),
+    ('t', "open the Productive task"),
+    ('c', "copy the URL"),
+];
 
 /// One kanban lane: its title, column, the PRs it shows (indices into `prs`) and how many
 /// drafts the draft filter hides from it.
@@ -101,6 +109,10 @@ pub struct PrsView {
     shown_at: Option<Instant>,
     /// Until when the periodic pull should be a real `tb-pr refresh` — set when a PR is opened.
     watch_until: Option<Instant>,
+    /// `prs.reviewPrompt`; read from the config when first needed.
+    pub(crate) review_prompt: Option<String>,
+    /// The `m` menu is open, with this item highlighted.
+    menu: Option<usize>,
 }
 
 impl Default for PrsView {
@@ -146,6 +158,8 @@ impl PrsView {
             opener: open_url,
             shown_at: None,
             watch_until: None,
+            review_prompt: None,
+            menu: None,
         }
     }
 
@@ -223,6 +237,108 @@ impl PrsView {
         }
         let base = self.task_base.as_deref()?;
         Some(format!("{base}/tasks/{id}"))
+    }
+
+    /// A card's action — `R`, `o`, `t` or `c`, from its key or the [`MENU`].
+    fn act(&mut self, c: char) -> Outcome {
+        match c {
+            'R' => {
+                let Some(p) = self.selected_pr() else {
+                    return Outcome::Log("no pull request selected".into());
+                };
+                let (url, name) = (p.url.clone(), format!("review-{}-{}", p.repo, p.number));
+                let prompt = self
+                    .review_prompt
+                    .get_or_insert_with(|| prs::Settings::load().review_prompt)
+                    .clone();
+                Outcome::SpawnPr { url, prompt, name }
+            }
+            'o' => {
+                if let Some(url) = self.selected_pr().map(|p| p.url.clone()) {
+                    // Opening a PR usually precedes merging or closing it out there — start a
+                    // window of real refreshes so that change shows up within a minute.
+                    self.watch_until = Some(Instant::now() + WATCH);
+                    if let Err(e) = (self.opener)(&url) {
+                        return Outcome::Log(e);
+                    }
+                }
+                Outcome::None
+            }
+            't' => match self.task_link() {
+                Some(url) => match (self.opener)(&url) {
+                    Ok(()) => Outcome::None,
+                    Err(e) => Outcome::Log(e),
+                },
+                None => Outcome::Log("no Productive task linked on this PR".into()),
+            },
+            'c' => match self.selected_pr() {
+                Some(p) => Outcome::Log(match copy(&p.url) {
+                    Ok(()) => format!("copied {}", p.url),
+                    Err(e) => e,
+                }),
+                None => Outcome::None,
+            },
+            _ => Outcome::None,
+        }
+    }
+
+    /// A key while the menu is open: move, run an item (Enter or its key) or close.
+    fn menu_key(&mut self, k: KeyEvent, at: usize) -> Outcome {
+        match k.code {
+            KeyCode::Down | KeyCode::Char('j') => self.menu = Some((at + 1).min(MENU.len() - 1)),
+            KeyCode::Up | KeyCode::Char('k') => self.menu = Some(at.saturating_sub(1)),
+            KeyCode::Enter => {
+                self.menu = None;
+                return self.act(MENU[at].0);
+            }
+            KeyCode::Char(c) if MENU.iter().any(|(key, _)| *key == c) => {
+                self.menu = None;
+                return self.act(c);
+            }
+            KeyCode::Esc | KeyCode::Char('m') => self.menu = None,
+            _ => {}
+        }
+        Outcome::None
+    }
+
+    /// The open menu, over the lanes.
+    fn draw_menu(&self, f: &mut Frame, area: Rect, at: usize) {
+        let Some(p) = self.selected_pr() else {
+            return;
+        };
+        let w = (MENU.iter().map(|(_, l)| l.len()).max().unwrap_or(0) as u16 + 8).min(area.width);
+        let h = (MENU.len() as u16 + 2).min(area.height);
+        let rect = Rect::new(
+            area.x + (area.width - w) / 2,
+            area.y + (area.height - h) / 2,
+            w,
+            h,
+        );
+        let lines: Vec<Line> = MENU
+            .iter()
+            .enumerate()
+            .map(|(i, (key, label))| {
+                let style = if i == at {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                Line::from(vec![
+                    Span::styled(format!(" {key}  "), style.fg(Color::Cyan)),
+                    Span::styled(format!("{label} "), style),
+                ])
+            })
+            .collect();
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(fit(
+                &format!(" {}#{} ", p.repo, p.number),
+                w.saturating_sub(2) as usize,
+            ));
+        f.render_widget(Clear, rect);
+        f.render_widget(Paragraph::new(lines).block(block), rect);
     }
 
     fn step_card(&mut self, down: bool) {
@@ -454,7 +570,7 @@ impl View for PrsView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ←/→ lane · ↑/↓ card · ⏎ open · t task · c copy · D drafts · A waiting on author · r refresh ",
+                " ←/→ lane · ↑/↓ card · ⏎ open · R review · m menu · t task · c copy · D drafts · A waiting on author · r refresh ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
@@ -506,9 +622,17 @@ impl View for PrsView {
                 edges,
             );
         }
+        if let Some(at) = self.menu {
+            self.draw_menu(f, inner, at);
+        }
     }
 
     fn key(&mut self, k: KeyEvent) -> Outcome {
+        if let Some(at) = self.menu
+            && !k.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return self.menu_key(k, at);
+        }
         if let Some(o) = common_key(k) {
             return o;
         }
@@ -521,31 +645,11 @@ impl View for PrsView {
             KeyCode::Down | KeyCode::Char('j') => self.step_card(true),
             KeyCode::Up | KeyCode::Char('k') => self.step_card(false),
             KeyCode::Char('r') => self.refresh(),
-            KeyCode::Enter | KeyCode::Char('o') => {
-                if let Some(url) = self.selected_pr().map(|p| p.url.clone()) {
-                    // Opening a PR usually precedes merging or closing it out there — start a
-                    // window of real refreshes so that change shows up within a minute.
-                    self.watch_until = Some(Instant::now() + WATCH);
-                    if let Err(e) = (self.opener)(&url) {
-                        return Outcome::Log(e);
-                    }
-                }
-            }
-            KeyCode::Char('t') => {
-                return match self.task_link() {
-                    Some(url) => match (self.opener)(&url) {
-                        Ok(()) => Outcome::None,
-                        Err(e) => Outcome::Log(e),
-                    },
-                    None => Outcome::Log("no Productive task linked on this PR".into()),
-                };
-            }
-            KeyCode::Char('c') => {
-                if let Some(p) = self.selected_pr() {
-                    return Outcome::Log(match copy(&p.url) {
-                        Ok(()) => format!("copied {}", p.url),
-                        Err(e) => e,
-                    });
+            KeyCode::Enter => return self.act('o'),
+            KeyCode::Char(c @ ('R' | 'o' | 't' | 'c')) => return self.act(c),
+            KeyCode::Char('m') => {
+                if self.selected_pr().is_some() {
+                    self.menu = Some(0);
                 }
             }
             KeyCode::Char('D') => {
@@ -702,6 +806,92 @@ mod tests {
                 .unwrap()
                 .contains(&"https://app.example/42-acme/tasks/123".to_string())
         );
+    }
+
+    fn review_view(prs: Vec<Pr>) -> PrsView {
+        let mut v = view_with(prs);
+        v.opener = record;
+        v.review_prompt = Some("Review it.".into());
+        v
+    }
+
+    #[test]
+    fn shift_r_starts_a_review_session_on_the_selected_pr() {
+        let mut v = review_view(vec![pr(Column::WaitingOnMe, 2504, "credit notes")]);
+        // "Waiting on me" is the fourth lane.
+        for _ in 0..3 {
+            key(&mut v, KeyCode::Right);
+        }
+        assert_eq!(
+            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            Outcome::SpawnPr {
+                url: "https://github.com/acme/api/pull/2504".into(),
+                prompt: "Review it.".into(),
+                name: "review-api-2504".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn shift_r_on_an_empty_lane_only_says_so() {
+        let mut v = review_view(vec![]);
+        assert!(matches!(
+            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            Outcome::Log(_)
+        ));
+    }
+
+    #[test]
+    fn the_menu_lists_the_actions_and_runs_the_chosen_one() {
+        let mut v = review_view(vec![pr(Column::DraftMine, 8, "mine")]);
+        key(&mut v, KeyCode::Char('m'));
+        let s = screen(&mut v, 160, 20);
+        for item in [
+            "code review in a new session",
+            "open in the browser",
+            "open the Productive task",
+            "copy the URL",
+        ] {
+            assert!(s.contains(item), "{item} missing:\n{s}");
+        }
+        // The second item opens the PR, and running it closes the menu.
+        key(&mut v, KeyCode::Down);
+        assert_eq!(
+            v.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Outcome::None
+        );
+        assert!(
+            OPENED
+                .lock()
+                .unwrap()
+                .contains(&"https://github.com/acme/api/pull/8".to_string())
+        );
+        assert!(!screen(&mut v, 160, 20).contains("open in the browser"));
+    }
+
+    #[test]
+    fn the_menu_runs_an_item_by_its_key_and_esc_only_closes_it() {
+        let mut v = review_view(vec![pr(Column::DraftMine, 8, "mine")]);
+        key(&mut v, KeyCode::Char('m'));
+        assert_eq!(
+            v.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Outcome::None,
+            "Esc closes the menu instead of leaving the tab"
+        );
+        assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
+        key(&mut v, KeyCode::Char('m'));
+        assert!(matches!(
+            v.key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            Outcome::SpawnPr { .. }
+        ));
+        assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
+    }
+
+    #[test]
+    fn the_menu_needs_a_pr() {
+        let mut v = review_view(vec![]);
+        key(&mut v, KeyCode::Char('m'));
+        assert!(!screen(&mut v, 160, 20).contains("code review in a new session"));
     }
 
     #[test]

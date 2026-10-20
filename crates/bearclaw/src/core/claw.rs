@@ -69,7 +69,9 @@ tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads 
   - **`d`** — open a session up close (its screen, brief, and a box to send it a message).
   - **`n`** rename a session, **`?`** shows all keys.
 - **PRs** — a kanban of the PRs that need the user. ←/→ lane, ↑/↓ card, Enter opens in the browser,
-  `t` opens the linked Productive task, `D` shows/hides drafts, `A` shows/hides "waiting on author".
+  `t` opens the linked Productive task, `R` starts a code review session on the PR (in its own
+  worktree, opened right away), `m` opens a menu of these actions, `D` shows/hides drafts,
+  `A` shows/hides "waiting on author".
 - **Tasks** — the user's open Productive tasks; Enter opens one in the browser, `g` groups by status/project.
 - **Todo / Brain / Notepad** — the work list, the shared brain notes, and the user's own notes;
   `n` adds, Enter/`e` opens in the built-in editor (Ctrl+S saves, Esc saves and closes).
