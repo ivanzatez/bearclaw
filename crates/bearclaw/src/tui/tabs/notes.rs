@@ -1,5 +1,6 @@
-//! The Brain and Notepad tabs: a folder of notes to browse, filter, create, edit and delete.
-//! Brain holds `.md` notes every Claude session shares; Notepad is your own `.md`/`.txt`.
+//! The Memory and Notepad tabs: a folder of notes to browse, filter, create, edit and delete.
+//! Memory is the brain (`bearclaw brain`): `.md` notes every Claude session shares; Notepad is your
+//! own `.md`/`.txt`.
 
 use std::path::PathBuf;
 
@@ -42,7 +43,7 @@ pub struct NotesView {
 
 impl NotesView {
     pub fn brain() -> Self {
-        Self::new("Brain", &["md"], brain::root, None)
+        Self::new("Memory", &["md"], brain::root, None)
     }
 
     pub fn notepad() -> Self {
@@ -51,7 +52,7 @@ impl NotesView {
 
     /// The brain at a fixed folder, whatever the config says.
     pub fn brain_at(root: PathBuf) -> Self {
-        Self::new("Brain", &["md"], brain::root, Some(root))
+        Self::new("Memory", &["md"], brain::root, Some(root))
     }
 
     pub fn notepad_at(root: PathBuf) -> Self {

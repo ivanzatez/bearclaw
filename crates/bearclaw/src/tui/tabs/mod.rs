@@ -57,7 +57,7 @@ impl Tab {
             Tab::Tasks => "Tasks",
             Tab::Todo => "Todo",
             Tab::Usage => "Usage",
-            Tab::Brain => "Brain",
+            Tab::Brain => "Memory",
             Tab::Notes => "Notepad",
             Tab::Settings => "Settings",
         }
@@ -71,7 +71,7 @@ impl Tab {
             Tab::Tasks => "Ta",
             Tab::Todo => "To",
             Tab::Usage => "Us",
-            Tab::Brain => "Br",
+            Tab::Brain => "Me",
             Tab::Notes => "No",
             Tab::Settings => "St",
         }
@@ -358,7 +358,7 @@ mod tests {
         let s = text(&tiny);
         assert!(width_of(&s) <= 14, "{s}");
         assert!(
-            s.contains("‹") && s.contains("Brain") && s.contains("›"),
+            s.contains("‹") && s.contains("Memory") && s.contains("›"),
             "{s}"
         );
         assert_eq!(hit(&hits, 0), Some(Tab::Usage));

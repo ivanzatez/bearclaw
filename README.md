@@ -16,7 +16,7 @@ sessions are found and driven too.
 ## What's in the dashboard
 
 Run `bearclaw` in a terminal. The tabs along the top are **Sessions · Claw · PRs · Tasks · Todo ·
-Usage · Brain · Notepad · Settings**. Switch with Tab / Shift+Tab, Shift+←/→, or a click.
+Usage · Memory · Notepad · Settings**. Switch with Tab / Shift+Tab, Shift+←/→, or a click.
 
 **Sessions.** Every live session, whether it is working, idle or waiting on you, how full its
 context is, and the sticky note it keeps about its own progress. Enter opens a tmux session
@@ -42,7 +42,7 @@ to it (`g` or a click opens it). `m` opens a menu of everything you can do with 
 **Todo.** The one-line work list. Every session keeps its own item current, linked to the
 session and its task, so you can see who is on what and jump to them.
 
-**Brain.** A folder of markdown notes (`~/brain`) that every Claude Code session on the machine
+**Memory.** The brain: a folder of markdown notes (`~/brain`) that every Claude Code session on the machine
 reads before it starts and writes to when it learns something worth keeping. The tab browses,
 searches and edits them.
 

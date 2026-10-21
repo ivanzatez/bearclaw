@@ -117,7 +117,7 @@ impl SettingsView {
             .ok()
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .is_some_and(|v| brain::hook_installed(&v));
-        line("Brain".into());
+        line("Memory (the brain)".into());
         line(format!(
             "  folder    {} ({} notes)",
             root.display(),

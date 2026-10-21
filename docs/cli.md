@@ -236,7 +236,7 @@ whose dormant list can't be fetched has nothing pruned that run.
 
 ### Dashboard keys (`watch`)
 
-The dashboard has tabs — **Sessions · Claw · PRs · Tasks · Todo · Usage · Brain · Notepad · Settings** — on its
+The dashboard has tabs — **Sessions · Claw · PRs · Tasks · Todo · Usage · Memory · Notepad · Settings** — on its
 first row. Tab / Shift-Tab, Shift-→ / Shift-← (or a tap on the bar) switch them — Shift-→ / Shift-←
 also from inside an open terminal (Claw, or a session opened inside), where Tab and Shift-Tab belong
 to the program; on a narrow pane the bar shortens to
@@ -283,8 +283,8 @@ button at the right end of the tab bar, on any tab — reloads now):
 | --- | --- |
 | Claw | a chat with **Claw**, an operator Claude session (tmux `claw`, started on first visit in `${XDG_STATE_HOME:-~/.local/state}/bearclaw/claw`, or `$BEARCLAW_CLAW_DIR`) that runs bearclaw for you — "what's everyone doing", "fill in the todo and sticky notes", "tell work-2 to rerun the tests". Its brief is the workspace's `CLAUDE.md` (rewritten on every start; your additions go in `CLAUDE.local.md`), and `.claude/settings.json` lets it run `bearclaw`, `jq` and `date` without prompts. It starts with the configured `claude` command minus `ANTHROPIC_MODEL`, so it runs on Claude Code's own default model even when your shell pins one for work sessions. It asks before sending to or starting sessions. Every key goes to it; Ctrl+L (or a tap on its header) goes back to Sessions. Its session is left out of the Sessions list |
 | PRs | a kanban of the PRs that need you — **from [tb-pr](https://github.com/productiveio/cli-toolbox) when it is installed** (`tb-pr list --json`, so its rules exactly: direct review requests only, an approval takes a PR off your list until someone asks again; `prs.tbPr` names the binary), else from `bearclaw prs`. Lanes **Draft · In review · Ready to merge · Waiting on me · Mentions** (empty ones shown); cards show checks, ✎ when a reviewer asks for changes, title, `repo#N`, `[P-<task>]`, size, age and comments, the border coloured by how long it has waited (green fresh, yellow warming/stale, red rotting or worse; the selected card's border is thick) · ←/→ `h`/`l` lane · ↑/↓ `j`/`k` card · Enter/`o` open · `t` open the Productive task (`productive.appUrl` + `productive.orgSlug`, else the org id) · `c` copy the URL · `R` code review in a new session, in the background: a Claude session named `review-<repo>-<N>` (its tmux session too, `-2`… when that name is taken), started without asking in the directory `c` on Sessions offers (the first spawn dir) while you stay on the board; its first prompt names the PR (`owner/repo#N "title": <url>.`) and then `prs.reviewPrompt`. The card's bottom edge shows it — starting, `⧉ review · <status>` once it is in the session list (matched by that name), or why it failed — and a running one is not started twice · `g` (or a click on that edge) opens the review session on Sessions · a click on a card selects it · `m` a menu of these actions on the selected card (↑/↓ and Enter, or the item's key; Esc or a click closes) · `D` show/hide drafts asking for your review (hidden by default, counted in the lane title) · `A` show/hide "Waiting on author" (hidden by default) · on a narrow pane the lanes page, `‹`/`›` marking more. While the tab is on screen the board refreshes on its own each minute, and opening a PR (Enter/`o`) starts a short burst of real `tb-pr refresh`es, so a PR merged or closed out in the browser drops off within a minute without pressing `r` |
-| Brain | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
-| Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Brain; a title ending in `.txt` makes a plain-text note |
+| Memory | the brain's notes, newest first · `/` filter (every word must match) · Enter/`e` edit · `n` new note (asks for a title) · `x` delete (asks `y`) · Esc clears the filter, then leaves |
+| Notepad | your own notes (`.md` and `.txt`) in `notes.root` (default `~/notes`) · same keys as Memory; a title ending in `.txt` makes a plain-text note |
 | Settings | one page: config file, web server (and whether it answers), brain folder and hook, Productive org and token, spawn dirs, repos, PR scope · `e` edits the config, re-read on return |
 | Todo | one-line work items (`bearclaw todo`): ● in progress (with its session ⧉ and a Productive task ↗ when it has them), ○ open, ✓ done in the last 3 days · Enter opens the task in the browser, or goes to the session · `g` go to the session · `n` add · `x` done / reopen · `c` start a Claude session on the item (it claims it) · `d` delete (asks `y`). Re-read whenever a session writes it |
 | Usage | `bearclaw usage` as gauges (session, weekly, per model), reset times, extra usage |
@@ -471,7 +471,7 @@ bearclaw init --yes --self laptop \
 A folder of markdown notes every Claude Code session on this machine reads and writes —
 config `brain.root`, else `brain_root:` from `~/.brainrc` (the file the web composer's `brain:`
 completion reads), else `~/brain`. One topic per note; the title is the first `# ` heading
-(after optional `---` frontmatter), else the file name. The dashboard's Brain tab browses it.
+(after optional `---` frontmatter), else the file name. The dashboard's Memory tab browses it.
 
 | command | does |
 | --- | --- |

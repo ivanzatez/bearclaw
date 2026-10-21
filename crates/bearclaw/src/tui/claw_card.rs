@@ -148,7 +148,7 @@ pub fn render(f: &mut Frame, area: Rect, s: &Stats) {
     lines.push(info("Waiting on you", waiting));
     lines.push(info("Todo", format!("{} in progress", s.todo_doing)));
     lines.push(info("Usage", usage));
-    lines.push(info("Brain", format!("{} notes", s.brain_notes)));
+    lines.push(info("Memory", format!("{} notes", s.brain_notes)));
     lines.push(Line::default());
     lines.push(palette_bar());
 
