@@ -1,9 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { CircleAlertIcon, CodeXmlIcon, CopyIcon, Loader2Icon, LockIcon, SendIcon } from 'lucide-react'
+import { CircleAlertIcon, CodeXmlIcon, CopyIcon, Loader2Icon, LockIcon, PencilIcon, SaveIcon, SendIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLocation } from 'wouter'
 
-import { noteRawUrl } from '@/api/client'
+import { api, noteRawUrl } from '@/api/client'
 import type { NoteEntry, NoteFile } from '@/api/types'
 import { HostBadge } from '@/components/HostBadge'
 import { Linkified, Markdown } from '@/components/Markdown'
@@ -11,7 +11,7 @@ import { SendNoteDialog } from '@/components/notes/SendNoteDialog'
 import { CodeLines } from '@/components/session/FilePreview'
 import { Button } from '@/components/ui/button'
 import { FileLinksContext, HighlightContext, type FileLinkApi } from '@/hooks/useFileLinks'
-import { useNoteFile } from '@/hooks/useNotes'
+import { useNoteFile, useNotesBook } from '@/hooks/useNotes'
 import { copyWithToast } from '@/lib/clipboard'
 import { relTime } from '@/lib/format'
 import { isLocalHref } from '@/lib/markdown'
@@ -31,12 +31,34 @@ export interface NoteViewProps {
   desktop?: boolean
   /** Rendered above the note (the mobile back bar). */
   header?: ReactNode
+  /** After an edit was saved (Brain / Notepad): reload the tree. */
+  onSaved?: () => void
 }
 
 /** One note: title, path, frontmatter, then the body — links to other notes stay in the explorer. */
-export function NoteView({ host, path, entry, index, highlight, scrollToHit, desktop = false, header }: NoteViewProps) {
+export function NoteView({ host, path, entry, index, highlight, scrollToHit, desktop = false, header, onSaved }: NoteViewProps) {
   const [, navigate] = useLocation()
+  const book = useNotesBook()
   const { file, error, loading } = useNoteFile(host, entry?.kind === 'image' ? null : path, entry?.mtime)
+  // Brain / Notepad notes are edited here: the whole file (frontmatter included) as text.
+  const [draft, setDraft] = useState<{ key: string; text: string; mtime: number } | null>(null)
+  const editing = draft?.key === `${host}/${path}` ? draft : null
+  const [saving, setSaving] = useState(false)
+  const editable = book !== 'notes' && !!file && (file.kind === 'markdown' || file.kind === 'text') && !file.encrypted
+  const save = async () => {
+    if (!editing) return
+    setSaving(true)
+    try {
+      await api.saveNote(host, book, path, editing.text, editing.mtime)
+      setDraft(null)
+      toast.success('Saved')
+      onSaved?.()
+    } catch (err) {
+      toast.error('Not saved', { description: (err as Error)?.message })
+    } finally {
+      setSaving(false)
+    }
+  }
   const [sourceFor, setSourceFor] = useState<string | null>(null)
   const source = sourceFor === `${host}/${path}`
   const [sendOpen, setSendOpen] = useState(false)
@@ -46,16 +68,16 @@ export function NoteView({ host, path, entry, index, highlight, scrollToHit, des
       isLink: (raw, src) => (src === 'file' || src === 'wiki') && !!resolveNoteLink(index, path, raw, src === 'wiki'),
       open: (raw, src) => {
         const target = resolveNoteLink(index, path, raw, src === 'wiki')
-        if (target) navigate(notesHref(host, target.path))
+        if (target) navigate(notesHref(host, target.path, book))
         else toast.error(`No note at ${raw}`)
       },
       imageSrc: (src) => {
         if (!isLocalHref(src)) return null
         const target = resolveNoteLink(index, path, src)
-        return target?.kind === 'image' ? noteRawUrl(host, target.path) : null
+        return target?.kind === 'image' ? noteRawUrl(host, target.path, book) : null
       },
     }),
-    [index, path, host, navigate],
+    [index, path, host, navigate, book],
   )
 
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -71,7 +93,7 @@ export function NoteView({ host, path, entry, index, highlight, scrollToHit, des
   if (entry?.kind === 'image') {
     body = (
       <div className="flex justify-center p-4">
-        <img src={noteRawUrl(host, path)} alt={path} className="max-w-full rounded-md object-contain" />
+        <img src={noteRawUrl(host, path, book)} alt={path} className="max-w-full rounded-md object-contain" />
       </div>
     )
   } else if (error) {
@@ -85,6 +107,19 @@ export function NoteView({ host, path, entry, index, highlight, scrollToHit, des
       <p className="flex items-center gap-2 px-4 py-10 text-sm text-dimmer">
         <Loader2Icon className="size-4 animate-spin" /> Loading…
       </p>
+    )
+  } else if (editing) {
+    body = (
+      <div className={cn('mx-auto w-full px-4 pt-1 pb-6', desktop ? 'max-w-3xl' : 'max-w-2xl')}>
+        <textarea
+          value={editing.text}
+          onChange={(e) => setDraft({ ...editing, text: e.target.value })}
+          aria-label="Note text"
+          autoCapitalize="sentences"
+          spellCheck={false}
+          className="min-h-[60vh] w-full resize-y rounded-md border bg-card p-3 font-mono text-[0.875rem] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        />
+      </div>
     )
   } else if (file.kind === 'markdown' && !source) {
     body = (
@@ -122,7 +157,21 @@ export function NoteView({ host, path, entry, index, highlight, scrollToHit, des
             {entry?.mtime ? <span className="text-dimmer tabular-nums">· modified {relTime(entry.mtime)} ago</span> : null}
           </div>
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {file?.kind === 'markdown' ? (
+            {editing ? (
+              <>
+                <Button size="sm" onClick={() => void save()} disabled={saving}>
+                  {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />} Save
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setDraft(null)} disabled={saving}>
+                  Cancel
+                </Button>
+              </>
+            ) : editable ? (
+              <Button variant="outline" size="sm" onClick={() => setDraft({ key: `${host}/${path}`, text: file.text, mtime: file.mtime })}>
+                <PencilIcon /> Edit
+              </Button>
+            ) : null}
+            {file?.kind === 'markdown' && !editing ? (
               <Button variant="outline" size="sm" onClick={() => setSourceFor(source ? null : `${host}/${path}`)} aria-pressed={source}>
                 {source ? 'Rendered' : 'Source'}
               </Button>

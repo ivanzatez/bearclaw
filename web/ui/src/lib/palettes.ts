@@ -3,11 +3,11 @@
 // Pure helpers, unit-tested in palettes.test.ts (which also checks these hexes against index.css
 // and the index.html pre-paint script).
 
-export type PaletteId = 'default' | 'earth' | 'dusk'
+export type PaletteId = 'claw' | 'default' | 'earth' | 'dusk'
 export type PaletteMode = 'light' | 'dark'
 
 export const PALETTE_KEY = 'bearclaw.palette'
-export const DEFAULT_PALETTE: PaletteId = 'default'
+export const DEFAULT_PALETTE: PaletteId = 'claw'
 
 /** The three tokens a picker swatch previews: page, card, primary. `background` is also the
  *  PWA status-bar colour (meta theme-color). */
@@ -25,6 +25,15 @@ export interface Palette {
 }
 
 export const PALETTES: readonly Palette[] = [
+  {
+    id: 'claw',
+    label: 'Claw',
+    hint: 'The terminal dashboard: monospace, teal accent',
+    swatch: {
+      light: { background: '#fafafa', card: '#f0f0f1', primary: '#0e7c86' },
+      dark: { background: '#16161c', card: '#1c1c23', primary: '#56b6c2' },
+    },
+  },
   {
     id: 'default',
     label: 'Default',

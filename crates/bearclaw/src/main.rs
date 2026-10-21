@@ -4,9 +4,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 
 use bearclaw::cli::{
-    brain as brain_cmd, brief as brief_cmd, commands, config_cmd, group, hosts as host_cmds, init,
-    jobs as jobs_cmd, mcp, prs as prs_cmd, repos as repos_cmd, restore, skill, stack as stack_cmds,
-    tmux as tmux_cmds, todo as todo_cmd, usage as usage_cmd, web,
+    brain as brain_cmd, brief as brief_cmd, claw as claw_cmd, commands, config_cmd, group,
+    hosts as host_cmds, init, jobs as jobs_cmd, mcp, prs as prs_cmd, repos as repos_cmd, restore,
+    skill, stack as stack_cmds, tasks as tasks_cmd, tmux as tmux_cmds, todo as todo_cmd,
+    usage as usage_cmd, web,
 };
 use bearclaw::core::config;
 use bearclaw::core::discovery::Backend;
@@ -501,6 +502,19 @@ enum Commands {
     Sticky {
         #[command(subcommand)]
         action: todo_cmd::StickyAction,
+    },
+
+    /// Claw, the operator session behind the dashboard's Claw tab: find or start it, its workspace
+    Claw {
+        #[command(subcommand)]
+        action: claw_cmd::ClawAction,
+    },
+
+    /// Your open Productive tasks (the dashboard's Tasks tab)
+    Tasks {
+        /// Machine-readable output (the web API's shape)
+        #[arg(long)]
+        json: bool,
     },
 
     /// The brain: notes every Claude session reads and writes (hook, install, path)
@@ -1522,6 +1536,8 @@ set one with: bearclaw config set hosts.{h}.ssh <alias>"
         },
         Commands::Skill { action } => skill::run(&action)?,
         Commands::Brain { action } => brain_cmd::run(&action)?,
+        Commands::Claw { action } => claw_cmd::run(&action)?,
+        Commands::Tasks { json } => tasks_cmd::run(json)?,
         Commands::Todo { action } => todo_cmd::run_todo(action)?,
         Commands::Sticky { action } => todo_cmd::run_sticky(action)?,
         Commands::Mcp {

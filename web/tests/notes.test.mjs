@@ -309,3 +309,43 @@ test('HTTP: tree / search / file / raw locally and through a peer; 501 when off;
   assert.deepEqual(bearclaw.hosts.map((h) => [h.name, h.notes ?? null]), [['laptop', null], ['workstation', { name: 'notes' }]]);
   assert.deepEqual((await get(`${urls.workstation}/api/settings`)).body.notes, { enabled: true, name: 'notes' });
 });
+
+test('a writable book saves notes inside its root, refuses stale and encrypted ones, makes its root', async (t) => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-book-')));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, 'notes');
+  const book = createNotes({ config: { root, name: 'Notepad', writable: true }, home: base });
+  assert.equal((await book.tree()).files.length, 0, 'a missing root is created');
+  const saved = await book.write('ideas/first', '# First\n\nhello\n');
+  assert.equal(saved.path, 'ideas/first.md');
+  assert.equal(fs.readFileSync(path.join(root, 'ideas/first.md'), 'utf8'), '# First\n\nhello\n');
+  assert.equal((await book.tree()).files.map((f) => f.path).join(), 'ideas/first.md');
+  await book.write('ideas/first.md', 'v2', { mtime: saved.mtime });
+  await assert.rejects(book.write('ideas/first.md', 'v3', { mtime: saved.mtime - 5000 }), /changed since/);
+  fs.writeFileSync(path.join(root, 'secret.md'), `# s\n${AGE}\n`);
+  await assert.rejects(book.write('secret.md', 'x'), /encrypted/);
+  await assert.rejects(book.write('../escape.md', 'x'), /bad path|outside/);
+  await assert.rejects(book.write('.hidden/x.md', 'x'), /bad path|not a note path/);
+  await assert.rejects(book.write('node_modules/x.md', 'x'), /not a note path/);
+  await assert.rejects(book.write('pic.png', 'x'), /only markdown and text/);
+  const ro = createNotes({ config: { root, name: 'Notes' }, home: base });
+  await assert.rejects(ro.write('x.md', 'x'), /read-only/);
+});
+
+test('config books: Brain from brain.root or ~/.brainrc, Notepad from notes.root', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bearclaw-home-'));
+  try {
+    let c = normalizeConfig({ self: 'x' }, { env: {}, home });
+    assert.equal(c.books.brain.root, path.join(home, 'brain'));
+    assert.equal(c.books.notepad.root, path.join(home, 'notes'));
+    assert.equal(c.books.brain.writable, true);
+    fs.writeFileSync(path.join(home, '.brainrc'), 'brain_root: "~/kb"\n');
+    c = normalizeConfig({ self: 'x', notes: { root: '~/pad' } }, { env: {}, home });
+    assert.equal(c.books.brain.root, path.join(home, 'kb'));
+    assert.equal(c.books.notepad.root, path.join(home, 'pad'));
+    c = normalizeConfig({ self: 'x', brain: { root: '/abs/brain' } }, { env: {}, home });
+    assert.equal(c.books.brain.root, '/abs/brain');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

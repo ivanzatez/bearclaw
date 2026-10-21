@@ -6,7 +6,7 @@
     <title>Bearclaw</title>
     <meta name="description" content="Supervise and steer the Claude Code bearclaw" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0b0c0e" />
+    <meta name="theme-color" content="#16161c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -22,8 +22,8 @@
         var t = localStorage.getItem('bearclaw.theme')
         var light = t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches)
         var p = localStorage.getItem('bearclaw.palette')
-        var colors = { default: ['#0b0c0e', '#ffffff'], earth: ['#1a1512', '#f7f2ea'], dusk: ['#121119', '#faf9fc'] }
-        if (!colors.hasOwnProperty(p)) p = 'default'
+        var colors = { claw: ['#16161c', '#fafafa'], default: ['#0b0c0e', '#ffffff'], earth: ['#1a1512', '#f7f2ea'], dusk: ['#121119', '#faf9fc'] }
+        if (!colors.hasOwnProperty(p)) p = 'claw'
         if (light) document.documentElement.classList.remove('dark')
         if (p !== 'default') document.documentElement.dataset.palette = p
         document.querySelector('meta[name="theme-color"]').setAttribute('content', colors[p][light ? 1 : 0])

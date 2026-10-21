@@ -300,12 +300,31 @@ const MEMBERSHIPS_PATH: &str = "/organization_memberships?include=person,organiz
 /// to double-check against.
 const TASKS_QUERY: &str = "/tasks?filter[assignee_id]={person}&filter[status]=1&include=project,workflow_status,assignee&page[size]=200";
 
+/// `$<name>`, else (macOS) the Keychain's generic password of that name: a service started by
+/// launchd (the web server) has no shell profile to export it.
+fn token(name: &str) -> Option<String> {
+    if let Some(t) = std::env::var(name).ok().filter(|t| !t.trim().is_empty()) {
+        return Some(t);
+    }
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let out = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", name, "-w"])
+        .output()
+        .ok()?;
+    let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !t.is_empty()).then_some(t)
+}
+
 /// Your open tasks in the configured organisation, sorted by [`sort_tasks`].
 pub fn my_open_tasks(s: &Settings) -> Result<Vec<Task>, String> {
-    let token = std::env::var(&s.token_env)
-        .ok()
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| format!("no Productive token: set ${}", s.token_env))?;
+    let token = token(&s.token_env).ok_or_else(|| {
+        format!(
+            "no Productive token: set ${0} (or a Keychain item named {0})",
+            s.token_env
+        )
+    })?;
     let m = api_get(s, &token, MEMBERSHIPS_PATH)?;
     let (person, org_name) = parse_membership(&m, &s.org_id)
         .ok_or_else(|| format!("this token has no membership in organization {}", s.org_id))?;

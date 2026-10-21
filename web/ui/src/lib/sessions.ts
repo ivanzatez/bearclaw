@@ -52,10 +52,10 @@ export function findStatusFilter(id: string | null | undefined): StatusFilter {
   return STATUS_FILTERS.find((f) => f.id === id) ?? STATUS_FILTERS[0]
 }
 
-/** Every session across hosts (unreachable hosts contribute none), voice operators left out (they live in #/operator). */
+/** Every session across hosts (unreachable hosts contribute none), voice operators and Claw left out (they live in #/operator and #/claw). */
 export function allSessions(bearclaw: BearclawResponse | null | undefined): Session[] {
   const out: Session[] = []
-  for (const host of bearclaw?.hosts ?? []) for (const s of host.sessions ?? []) if (!s.operator) out.push({ ...s, host: s.host ?? host.name })
+  for (const host of bearclaw?.hosts ?? []) for (const s of host.sessions ?? []) if (!s.operator && !s.claw) out.push({ ...s, host: s.host ?? host.name })
   return out
 }
 

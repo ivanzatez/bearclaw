@@ -55,6 +55,8 @@ export interface Session {
   origin?: SessionOrigin | null
   /** The host's voice operator (web/lib/operator.mjs): kept out of session lists. Older servers omit it. */
   operator?: boolean
+  /** Claw, the dashboard's operator (its workspace's session): shown in the Claw tab, not the list. */
+  claw?: boolean
 }
 
 /** `origin` on a session row: the job and the run id (`<job>/<run>` in its tmux environment). */
@@ -151,6 +153,8 @@ export interface Host {
   spawnDirs?: SpawnDir[]
   /** Set when that host's server has a notes explorer (`web.notes.root`). */
   notes?: { name: string | null }
+  /** The dashboard's writable notebooks on this host (`brain`, `notepad`): the notes routes with `?book=`. */
+  books?: NotesBook[]
   sessions: Session[]
 }
 
@@ -195,6 +199,10 @@ export interface Settings {
   speak?: { enabled: boolean; voice?: string | null }
   /** The voice operator (GET/POST /api/operator) is available on this server (older servers: absent). */
   operator?: { enabled: boolean; hosts?: string[] }
+  /** Claw (GET/POST /api/claw) on this server (older servers: absent). */
+  claw?: { enabled: boolean; dir?: string | null }
+  /** What a review session started from a PR card is told (config `prs.reviewPrompt`). */
+  prs?: { reviewPrompt?: string | null }
   /** Push notifications (/api/push…): `publicKey` is the VAPID key devices subscribe with (older servers: absent). */
   push?: { enabled: boolean; publicKey?: string }
 }
@@ -719,6 +727,53 @@ export interface NotesSearch {
   results: NoteHit[]
   total: number
   ms: number
+}
+
+/** A notes explorer: `notes` (config `web.notes`, read-only) or the dashboard's Brain / Notepad. */
+export type NotesBook = 'notes' | 'brain' | 'notepad'
+
+/** GET/POST /api/claw — Claw's session on this server (null until it shows in the bearclaw). */
+export interface ClawStatus {
+  host: string
+  dir: string | null
+  session: Session | null
+  tmuxSession?: string | null
+}
+
+/** GET/POST /api/hosts/:host/todo — `bearclaw todo list --json`. */
+export interface TodoItem {
+  id: number
+  text: string
+  status: 'open' | 'doing' | 'done'
+  session: string | null
+  sessionLabel: string | null
+  taskUrl: string | null
+  createdMs: number
+  updatedMs: number
+}
+export interface TodoResponse {
+  host: string
+  items: TodoItem[]
+}
+export type TodoEdit = { op: 'add'; text: string; task?: string } | { op: 'done' | 'rm'; id: number }
+
+/** GET /api/hosts/:host/tasks — `bearclaw tasks --json`: your open Productive tasks, board order. */
+export interface ProductiveTask {
+  id: string
+  number: string
+  title: string
+  project: string
+  status: string
+  dueDate: string | null
+  updatedAt: string
+  url: string
+  description: string
+  /** 0 not started, 1 started, 2 closed (the status's category). */
+  statusCategory: number
+}
+export interface TasksResponse {
+  host: string
+  tasks: ProductiveTask[]
 }
 
 export interface NoteFile {

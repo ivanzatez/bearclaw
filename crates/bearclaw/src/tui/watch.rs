@@ -1558,63 +1558,9 @@ fn copy_selection(text: &str, log: &mut Vec<Ev>) {
 fn start_claw() -> Receiver<std::result::Result<String, String>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
-        let _ = tx.send(find_or_start_claw());
+        let _ = tx.send(crate::core::claw::find_or_start());
     });
     rx
-}
-
-/// Prepare Claw's workspace, then reuse its running session or start one. A `claw` session that
-/// isn't ours is left alone.
-fn find_or_start_claw() -> std::result::Result<String, String> {
-    use crate::core::claw;
-    use crate::core::harness::Harness;
-    let dir = claw::dir();
-    claw::prepare(&dir).map_err(|e| e.to_string())?;
-    let target = format!("={}:", claw::SESSION);
-    let tmux = |args: &[&str]| {
-        crate::core::tools::tmux_cmd()
-            .args(args)
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    };
-    if tmux(&["has-session", "-t", &format!("={}", claw::SESSION)]).is_some() {
-        // Ours: marked, or (started before the mark existed) running in the workspace.
-        let marked =
-            tmux(&["show-options", "-qv", "-t", &target, claw::MARK]).as_deref() == Some("1");
-        let here = tmux(&[
-            "display-message",
-            "-p",
-            "-t",
-            &target,
-            "#{pane_current_path}",
-        ]);
-        if !marked && here.as_deref().map(std::path::Path::new) != Some(dir.as_path()) {
-            return Err(format!(
-                "a tmux session called `{}` exists and isn't Claw — rename it, then r",
-                claw::SESSION
-            ));
-        }
-        tmux(&["set-option", "-t", &target, claw::MARK, "1"]);
-        return Ok(claw::SESSION.to_string());
-    }
-    let (_, ts) = backend::spawn_tagged(
-        crate::core::discovery::Backend::Tmux,
-        &dir.display().to_string(),
-        backend::Prompt::None,
-        None,
-        Some(claw::SESSION),
-        false,
-        &claw::launcher(&Harness::Claude.command()),
-        Harness::Claude,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
-    let ts = ts.unwrap_or_else(|| claw::SESSION.to_string());
-    tmux(&["set-option", "-t", &format!("={ts}:"), claw::MARK, "1"]);
-    Ok(ts)
 }
 
 /// An open terminal under a one-line header; returns where the screen went (for the wheel).

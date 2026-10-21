@@ -1,6 +1,7 @@
 import { ChevronRightIcon, FileTextIcon, FolderIcon, FolderOpenIcon, ImageIcon, LockIcon, FileCodeIcon } from 'lucide-react'
 
 import type { NoteEntry } from '@/api/types'
+import { useNotesBook } from '@/hooks/useNotes'
 import { notesHref, type TreeDir } from '@/lib/notes'
 import { basename } from '@/lib/paths'
 import { cn } from '@/lib/utils'
@@ -29,6 +30,7 @@ export function NoteTree({ host, root, open, onToggle, selected, compact = false
 function Level({ host, dir, depth, open, onToggle, selected, compact }: Omit<NoteTreeProps, 'root'> & { dir: TreeDir; depth: number }) {
   const row = cn('flex w-full min-w-0 items-center gap-1.5 rounded-md pr-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50', compact ? 'h-7 text-[0.8125rem]' : 'min-h-11 text-[0.9375rem]')
   const pad = (d: number) => ({ paddingLeft: `${0.5 + d * (compact ? 0.875 : 1)}rem` })
+  const book = useNotesBook()
   return (
     <>
       {dir.dirs.map((d) => {
@@ -55,7 +57,7 @@ function Level({ host, dir, depth, open, onToggle, selected, compact }: Omit<Not
         return (
           <li key={f.path} role="treeitem" aria-selected={active}>
             <a
-              href={`#${notesHref(host, f.path)}`}
+              href={`#${notesHref(host, f.path, book)}`}
               title={f.title && f.title !== fileName(f) ? `${f.title} — ${f.path}` : f.path}
               data-note-path={f.path}
               aria-current={active ? 'page' : undefined}

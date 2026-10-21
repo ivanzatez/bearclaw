@@ -46,7 +46,12 @@ import type {
   StackView,
   TranscribeResponse,
   OperatorStatus,
+  ClawStatus,
+  NotesBook,
   PushDevice,
+  TasksResponse,
+  TodoEdit,
+  TodoResponse,
   UploadResponse,
   PrSpawnResponse,
   PrWorktree,
@@ -114,6 +119,8 @@ export async function request<T>(path: string, { signal, method = 'GET', body, f
 
 const enc = encodeURIComponent
 const hostPath = (host: string) => `/api/hosts/${enc(host)}`
+/** `&book=brain` (or `?book=…` first): the notes routes' notebook; the default explorer has none. */
+const bookQuery = (book: NotesBook | undefined, sep: '?' | '&' = '&') => (book && book !== 'notes' ? `${sep}book=${book}` : '')
 const sessionPath = (host: string, id: string, suffix: string) => `${hostPath(host)}/sessions/${enc(id)}/${suffix}`
 
 type Opts = { signal?: AbortSignal }
@@ -247,10 +254,20 @@ export const api = {
   regenerateBrief: (host: string, id: string, o: Opts = {}) =>
     request<BriefRegenerateResponse>(sessionPath(host, id, 'brief/regenerate'), { ...o, method: 'POST', body: {} }),
 
-  notesTree: (host: string, o: Opts = {}) => request<NotesTree>(`${hostPath(host)}/notes/tree`, o),
-  notesSearch: (host: string, q: string, limit = 50, o: Opts = {}) =>
-    request<NotesSearch>(`${hostPath(host)}/notes/search?q=${enc(q)}&limit=${limit}`, o),
-  noteFile: (host: string, path: string, o: Opts = {}) => request<NoteFile>(`${hostPath(host)}/notes/file?path=${enc(path)}`, o),
+  notesTree: (host: string, o: Opts & { book?: NotesBook } = {}) => request<NotesTree>(`${hostPath(host)}/notes/tree${bookQuery(o.book, '?')}`, o),
+  notesSearch: (host: string, q: string, limit = 50, o: Opts & { book?: NotesBook } = {}) =>
+    request<NotesSearch>(`${hostPath(host)}/notes/search?q=${enc(q)}&limit=${limit}${bookQuery(o.book)}`, o),
+  noteFile: (host: string, path: string, o: Opts & { book?: NotesBook } = {}) =>
+    request<NoteFile>(`${hostPath(host)}/notes/file?path=${enc(path)}${bookQuery(o.book)}`, o),
+  /** Save a Brain / Notepad note (created when new); `mtime`: the version it was edited from (409 when newer on disk). */
+  saveNote: (host: string, book: NotesBook, path: string, text: string, mtime: number | null, o: Opts = {}) =>
+    request<NoteFile>(`${hostPath(host)}/notes/file?path=${enc(path)}${bookQuery(book)}`, { ...o, method: 'PUT', body: { text, mtime } }),
+
+  claw: (o: Opts = {}) => request<ClawStatus>('/api/claw', o),
+  startClaw: (o: Opts = {}) => request<ClawStatus>('/api/claw', { ...o, method: 'POST', body: {} }),
+  todo: (host: string, o: Opts = {}) => request<TodoResponse>(`${hostPath(host)}/todo`, o),
+  editTodo: (host: string, edit: TodoEdit, o: Opts = {}) => request<TodoResponse>(`${hostPath(host)}/todo`, { ...o, method: 'POST', body: edit }),
+  tasks: (host: string, o: Opts = {}) => request<TasksResponse>(`${hostPath(host)}/tasks`, o),
 
   /** Session stacks on `host` (404 / 501 on servers that predate stacks — see lib/stacks.ts `stacksMissing`). */
   stacks: (host: string, o: Opts = {}) => request<StacksResponse>(`${hostPath(host)}/stacks`, o),
@@ -314,8 +331,8 @@ export function fileRawUrl(host: string, id: string, path: string, { download = 
 }
 
 /** GET …/notes/raw — an image inside the notes root. */
-export function noteRawUrl(host: string, path: string): string {
-  return `${hostPath(host)}/notes/raw?path=${enc(path)}`
+export function noteRawUrl(host: string, path: string, book?: NotesBook): string {
+  return `${hostPath(host)}/notes/raw?path=${enc(path)}${bookQuery(book)}`
 }
 
 /** A short, human message for a failed session request (peek/messages/send…). */

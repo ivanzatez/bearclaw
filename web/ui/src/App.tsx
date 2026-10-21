@@ -13,9 +13,11 @@ import { PrsProvider } from '@/providers/PrsProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
 import { SpeechProvider } from '@/providers/SpeechProvider'
 import { usePreventFileNavigation } from '@/hooks/useAttach'
+import { NotesBookContext } from '@/hooks/useNotes'
 import { usePushPresence } from '@/hooks/usePush'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { ThemeProvider } from '@/providers/ThemeProvider'
+import { ClawScreen } from '@/screens/ClawScreen'
 import { DesktopShell } from '@/screens/DesktopShell'
 import { JobsScreen } from '@/screens/JobsScreen'
 import { MemosScreen } from '@/screens/MemosScreen'
@@ -25,10 +27,13 @@ import { OperatorScreen } from '@/screens/OperatorScreen'
 import { PrsScreen } from '@/screens/PrsScreen'
 import { SessionScreen } from '@/screens/SessionScreen'
 import { SettingsScreen } from '@/screens/SettingsScreen'
+import { TasksScreen } from '@/screens/TasksScreen'
+import { TodoScreen } from '@/screens/TodoScreen'
 import { UsageScreen } from '@/screens/UsageScreen'
 
 /**
  * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
+ * plus the terminal dashboard's tabs on the phone: `#/claw` (Claw), `#/todo`, `#/tasks`, `#/brain[/…]`, `#/notepad[/…]`,
  * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the bearclaw by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
@@ -59,6 +64,25 @@ export default function App() {
                   </Route>
                   <Route path="/settings">
                     <SettingsScreen />
+                  </Route>
+                  <Route path="/claw">
+                    <ClawScreen />
+                  </Route>
+                  <Route path="/todo">
+                    <TodoScreen />
+                  </Route>
+                  <Route path="/tasks">
+                    <TasksScreen />
+                  </Route>
+                  <Route path={/^\/brain(?:\/.*)?$/}>
+                    <NotesBookContext.Provider value="brain">
+                      <NotesScreen />
+                    </NotesBookContext.Provider>
+                  </Route>
+                  <Route path={/^\/notepad(?:\/.*)?$/}>
+                    <NotesBookContext.Provider value="notepad">
+                      <NotesScreen />
+                    </NotesBookContext.Provider>
                   </Route>
                   <Route path="/usage">
                     <UsageScreen />

@@ -616,3 +616,75 @@ test('/api/push routes reach the push module; settings carry its public key; 501
   assert.deepEqual((await bare({ method: 'GET', headers: {} }, new URL('http://x/api/settings'))).body.push, { enabled: false });
   await assert.rejects(bare({ method: 'GET', headers: {} }, new URL('http://x/api/push')), /not available/);
 });
+
+test('/api/claw finds Claw by its workspace (stamped in the bearclaw), POST starts it; Claw is not a list row for push', async () => {
+  const claw = { pid: 1, session_id: 'cccccccc-1', name: 'claw-96', cwd: '/home/tester/.local/state/bearclaw/claw', status: 'idle' };
+  const host = fakeHost('solo', [claw, { pid: 2, session_id: 'aaaaaaaa-1', name: 'work', cwd: '/home/tester/work', status: 'busy' }]);
+  host.cli.clawStart = async () => (host.calls.push(['clawStart']), { session: 'claw', dir: '/home/tester/.local/state/bearclaw/claw' });
+  const config = normalizeConfig({ self: 'solo' }, { env: {}, home: '/home/tester' });
+  const api = createApi({ config, ...host, warmBearclaw: false });
+  const get = await api({ method: 'GET', headers: {} }, new URL('http://x/api/claw'));
+  assert.equal(get.body.session.session_id, 'cccccccc-1');
+  assert.equal(get.body.dir, '/home/tester/.local/state/bearclaw/claw');
+  const post = await api({ method: 'POST', headers: {}, async *[Symbol.asyncIterator]() {} }, new URL('http://x/api/claw'));
+  assert.equal(post.body.tmuxSession, 'claw');
+  assert.deepEqual(host.calls.filter((c) => c[0] === 'clawStart'), [['clawStart']]);
+  const list = await api({ method: 'GET', headers: {} }, new URL('http://x/api/bearclaw'));
+  const byName = Object.fromEntries(list.body.hosts[0].sessions.map((s) => [s.name, s.claw ?? false]));
+  assert.deepEqual(byName, { 'claw-96': true, work: false });
+  const settings = await api({ method: 'GET', headers: {} }, new URL('http://x/api/settings'));
+  assert.equal(settings.body.claw.enabled, true);
+  assert.match(settings.body.prs.reviewPrompt, /p-dev:review/);
+});
+
+test('todo and tasks routes go through the CLI and check what they are given', async (t) => {
+  const host = fakeHost('solo', []);
+  const items = [{ id: 1, text: 'a', status: 'open' }];
+  host.cli.todo = async () => ({ version: 1, nextId: 2, items });
+  host.cli.todoEdit = async (edit) => (host.calls.push(['todoEdit', edit]), { version: 1, nextId: 3, items });
+  host.cli.tasks = async () => ({ tasks: [{ id: '9', title: 'T' }] });
+  const config = normalizeConfig({ self: 'solo' }, { env: {}, home: '/home/tester' });
+  const server = createHttpServer({ handleApi: createApi({ config, ...host, warmBearclaw: false }), uiDir: null });
+  const base = await listen(server);
+  t.after(() => server.close());
+  assert.equal((await get(`${base}/api/hosts/solo/todo`)).body.items.length, 1);
+  assert.equal((await post(`${base}/api/hosts/solo/todo`, { op: 'add', text: '  fix   the  thing ', task: 'https://app.productive.io/t/1' })).status, 200);
+  assert.equal((await post(`${base}/api/hosts/solo/todo`, { op: 'done', id: 1 })).status, 200);
+  assert.equal((await post(`${base}/api/hosts/solo/todo`, { op: 'add', text: ' ' })).status, 400);
+  assert.equal((await post(`${base}/api/hosts/solo/todo`, { op: 'rm', id: 'x' })).status, 400);
+  assert.equal((await post(`${base}/api/hosts/solo/todo`, { op: 'claim', id: 1 })).status, 400);
+  assert.deepEqual(host.calls.filter((c) => c[0] === 'todoEdit').map((c) => c[1]), [
+    { op: 'add', text: 'fix the thing', task: 'https://app.productive.io/t/1' },
+    { op: 'done', id: 1 },
+  ]);
+  assert.equal((await get(`${base}/api/hosts/solo/tasks`)).body.tasks[0].title, 'T');
+  host.cli.tasks = async () => {
+    throw Object.assign(new Error('no Productive token: set $PRODUCTIVE_AUTH_TOKEN'), { timedOut: false });
+  };
+  const failed = await get(`${base}/api/hosts/solo/tasks`);
+  assert.equal(failed.status, 502);
+  assert.match(failed.body.error, /no Productive token/);
+});
+
+test('the CLI wrappers for Claw, tasks and the todo run --local commands and surface the CLI reason', async () => {
+  const calls = [];
+  const run = async (bin, args) => {
+    calls.push(args);
+    if (args.includes('tasks')) throw Object.assign(new Error('exit 1'), { stderr: 'Error: no Productive token: set $PRODUCTIVE_AUTH_TOKEN\n' });
+    if (args.includes('start')) return { stdout: '{"session":"claw","dir":"/d"}', stderr: '' };
+    return { stdout: '{"version":1,"items":[]}', stderr: '' };
+  };
+  const cli = createBearclawCli({ run, bin: '/x/bearclaw' });
+  assert.deepEqual(await cli.clawStart(), { session: 'claw', dir: '/d' });
+  await assert.rejects(cli.tasks(), /no Productive token/);
+  await cli.todoEdit({ op: 'add', text: 'one line', task: 'https://t/1' });
+  await cli.todoEdit({ op: 'rm', id: 4 });
+  assert.deepEqual(calls, [
+    ['--local', 'claw', 'start', '--json'],
+    ['--local', 'tasks', '--json'],
+    ['--local', 'todo', 'add', 'one line', '--task', 'https://t/1'],
+    ['--local', 'todo', 'list', '--json'],
+    ['--local', 'todo', 'rm', '4'],
+    ['--local', 'todo', 'list', '--json'],
+  ]);
+});

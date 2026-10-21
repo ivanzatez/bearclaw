@@ -286,6 +286,8 @@ export function createNotes({ config, home, run = null, now = Date.now } = {}) {
   let cachedBytes = 0;
 
   async function rootReal() {
+    // A writable book (the dashboard's Brain / Notepad) starts out as an empty folder.
+    if (config.writable) await fsp.mkdir(root, { recursive: true }).catch(() => {});
     try {
       realRoot = await fsp.realpath(root);
     } catch {
@@ -548,7 +550,43 @@ export function createNotes({ config, home, run = null, now = Date.now } = {}) {
     return { q, engine: 'builtin', ...(await builtinSearch(terms, limit)), ms: now() - started };
   }
 
-  return { tree: treeResponse, file, raw, search, root, name: config.name };
+  /**
+   * Save a note (`config.writable` only): a markdown or text file inside the root, created with its
+   * folders when new. `mtime`: the version the editor started from — a newer file on disk is a 409.
+   * A file with age-encrypted blocks is never written: it is only ever served redacted.
+   */
+  async function write(relRaw, text, { mtime = null } = {}) {
+    if (!config.writable) throw new HttpError('these notes are read-only', 405);
+    let rel = cleanRel(relRaw);
+    if (!rel) throw new HttpError('bad path', 400);
+    if (!path.extname(rel)) rel = `${rel}.md`;
+    const kind = noteKind(rel);
+    if (kind !== 'markdown' && kind !== 'text') throw new HttpError('only markdown and text notes can be saved', 400);
+    if (typeof text !== 'string') throw new HttpError('text is required', 400);
+    if (Buffer.byteLength(text) > NOTE_MAX_BYTES) throw new HttpError(`too large (max ${NOTE_MAX_BYTES} bytes)`, 413);
+    const real = realRoot ?? (await rootReal());
+    const abs = path.join(real, rel);
+    if (!inside(abs, real)) throw new HttpError('outside the notes root', 403);
+    const parts = rel.split('/');
+    if (parts.some((p) => p.startsWith('.') || ALWAYS_EXCLUDED.has(p) || exclude.has(p))) throw new HttpError('not a note path', 400);
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+    const parent = await fsp.realpath(path.dirname(abs));
+    if (!inside(parent, real)) throw new HttpError('outside the notes root', 403);
+    const st = await fsp.lstat(abs).catch(() => null);
+    if (st) {
+      if (!st.isFile()) throw new HttpError('not a note file', 400);
+      if (mtime != null && Math.round(st.mtimeMs) !== mtime) throw new HttpError('the note changed since you opened it', 409);
+      if (HAS_AGE_RE.test(await fsp.readFile(abs, 'utf8'))) throw new HttpError('this note has encrypted parts: edit it on the machine', 409);
+    }
+    const tmp = path.join(path.dirname(abs), `.${path.basename(abs)}.${process.pid}.tmp`);
+    await fsp.writeFile(tmp, text);
+    await fsp.rename(tmp, abs);
+    tree = null;
+    texts.delete(rel);
+    return file(rel);
+  }
+
+  return { tree: treeResponse, file, raw, search, write, root, name: config.name, writable: config.writable === true };
 }
 
 const inside = (p, r) => p === r || p.startsWith(r.endsWith(path.sep) ? r : r + path.sep);

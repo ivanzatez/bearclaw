@@ -4,15 +4,16 @@ import { expect, test } from 'vitest'
 
 import { PALETTES, parsePalette, themeColor, type PaletteMode } from './palettes'
 
-test('parsePalette: known ids pass, anything else is Default', () => {
+test('parsePalette: known ids pass, anything else is Claw (the default)', () => {
   expect(parsePalette('earth')).toBe('earth')
   expect(parsePalette('dusk')).toBe('dusk')
   expect(parsePalette('default')).toBe('default')
-  expect(parsePalette(null)).toBe('default')
-  expect(parsePalette(undefined)).toBe('default')
-  expect(parsePalette('')).toBe('default')
-  expect(parsePalette('Earth')).toBe('default')
-  expect(parsePalette('toString')).toBe('default')
+  expect(parsePalette('claw')).toBe('claw')
+  expect(parsePalette(null)).toBe('claw')
+  expect(parsePalette(undefined)).toBe('claw')
+  expect(parsePalette('')).toBe('claw')
+  expect(parsePalette('Earth')).toBe('claw')
+  expect(parsePalette('toString')).toBe('claw')
 })
 
 test('themeColor: the palette background per mode', () => {
@@ -20,6 +21,7 @@ test('themeColor: the palette background per mode', () => {
   expect(themeColor('default', 'light')).toBe('#ffffff')
   expect(themeColor('earth', 'light')).toBe('#f7f2ea')
   expect(themeColor('dusk', 'dark')).toBe('#121119')
+  expect(themeColor('claw', 'dark')).toBe('#16161c')
 })
 
 // Read from disk: vitest stubs CSS imports (even `?raw`).

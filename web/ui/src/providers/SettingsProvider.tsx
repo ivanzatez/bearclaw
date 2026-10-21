@@ -27,6 +27,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           operator: data?.operator?.enabled === true,
           memos: data?.memos?.enabled === true,
           pushKey: data?.push?.enabled === true && typeof data.push.publicKey === 'string' ? data.push.publicKey : null,
+          claw: data?.claw?.enabled === true,
+          reviewPrompt: typeof data?.prs?.reviewPrompt === 'string' && data.prs.reviewPrompt ? data.prs.reviewPrompt : null,
           loaded: true,
         })
       })

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react'
-import { ChevronLeftIcon, CodeXmlIcon, NotebookTextIcon, SearchIcon, XIcon } from 'lucide-react'
+import { ChevronLeftIcon, CodeXmlIcon, NotebookTextIcon, PlusIcon, SearchIcon, XIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { useLocation } from 'wouter'
 
+import { api } from '@/api/client'
 import { HostDot } from '@/components/HostBadge'
 import { NoteResults, RecentNotes } from '@/components/notes/NoteResults'
 import { NoteTree } from '@/components/notes/NoteTree'
@@ -10,10 +12,10 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
-import { useNotesHosts, useNotesSearch, useNotesTree } from '@/hooks/useNotes'
+import { useNotesBook, useNotesHosts, useNotesSearch, useNotesTree } from '@/hooks/useNotes'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
-import { ancestorDirs, buildTree, highlightTerms, notesHref, parseNotesLocation, recentNotes } from '@/lib/notes'
+import { ancestorDirs, buildTree, highlightTerms, notesHref as notesHrefIn, parseNotesLocation, recentNotes } from '@/lib/notes'
 import { shortcutHint } from '@/lib/shortcuts'
 import { storage } from '@/lib/storage'
 import { cn } from '@/lib/utils'
@@ -41,20 +43,41 @@ export interface NotesScreenProps {
 
 /**
  * `#/notes[/<host>[/<path>]]`: browse (folder tree), search (debounced, snippets with the
- * matches marked) and read the markdown notes of any host that has `web.notes.root`.
+ * matches marked) and read the markdown notes of any host that has `web.notes.root`. Under
+ * NotesBookContext `brain` / `notepad` (`#/brain…`, `#/notepad…`): the dashboard's Brain and
+ * Notepad tabs, whose notes can be edited and added.
  */
 export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) {
   const pane = layout === 'pane'
   const [location, navigate] = useLocation()
-  const loc = parseNotesLocation(location) ?? { host: null, path: null }
-  const hosts = useNotesHosts()
+  const book = useNotesBook()
+  const notesHref = (host?: string | null, path?: string | null) => notesHrefIn(host, path, book)
+  const loc = parseNotesLocation(location, book) ?? { host: null, path: null }
+  const hosts = useNotesHosts(book)
   const [lastHost, setLastHost] = usePersistentState<string>('bearclaw.notesHost', '')
   const host = loc.host ?? hosts.find((h) => h.name === lastHost)?.name ?? hosts[0]?.name ?? null
   useEffect(() => {
     if (loc.host && loc.host !== lastHost) setLastHost(loc.host)
   }, [loc.host, lastHost, setLastHost])
 
-  const { tree, index, error } = useNotesTree(host)
+  const { tree, index, error, refresh } = useNotesTree(host)
+  const newNote = async () => {
+    if (!host) return
+    const name = window.prompt(`New note in ${tree?.name ?? book}`, '')?.trim()
+    if (!name) return
+    const path = /\.[a-z0-9]+$/i.test(name) ? name : `${name}.md`
+    if (index.byPath.has(path)) {
+      navigate(notesHref(host, path))
+      return
+    }
+    try {
+      await api.saveNote(host, book, path, `# ${name.replace(/\.[a-z0-9]+$/i, '').split('/').pop()}\n\n`, null)
+      refresh()
+      navigate(notesHref(host, path))
+    } catch (err) {
+      toast.error('Not created', { description: (err as Error)?.message })
+    }
+  }
   const root = useMemo(() => buildTree(tree?.files ?? []), [tree])
   const recent = useMemo(() => recentNotes(tree?.files ?? []), [tree])
   const entry = loc.path ? (index.byPath.get(loc.path) ?? null) : null
@@ -68,12 +91,13 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
   const highlight = useMemo(() => highlightTerms(q), [q])
   const [hitPath, setHitPath] = useState<string | null>(null)
 
-  // Expanded folders, per host; the open note's folders are expanded when it opens.
-  const [openState, setOpenState] = useState<{ host: string | null; open: Set<string> }>(() => ({ host, open: loadOpen(host) }))
-  const open = openState.host === host ? openState.open : loadOpen(host)
+  // Expanded folders, per notebook + host; the open note's folders are expanded when it opens.
+  const openFor = host && book !== 'notes' ? `${book}:${host}` : host
+  const [openState, setOpenState] = useState<{ host: string | null; open: Set<string> }>(() => ({ host: openFor, open: loadOpen(openFor) }))
+  const open = openState.host === openFor ? openState.open : loadOpen(openFor)
   const saveOpen = (next: Set<string>) => {
-    setOpenState({ host, open: next })
-    if (host) storage.set(openKey(host), JSON.stringify([...next]))
+    setOpenState({ host: openFor, open: next })
+    if (openFor) storage.set(openKey(openFor), JSON.stringify([...next]))
   }
   const toggle = (dir: string) => {
     const next = new Set(open)
@@ -87,8 +111,8 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
     const missing = ancestorDirs(loc.path).filter((d) => !open.has(d))
     if (missing.length) {
       const next = new Set([...open, ...missing])
-      setOpenState({ host, open: next })
-      storage.set(openKey(host), JSON.stringify([...next]))
+      setOpenState({ host: openFor, open: next })
+      if (openFor) storage.set(openKey(openFor), JSON.stringify([...next]))
     }
   }
 
@@ -171,7 +195,9 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
     </div>
   )
 
-  const notice = !hosts.length ? (
+  const notice = !hosts.length && book !== 'notes' ? (
+    <Empty title={`No ${book === 'brain' ? 'Brain' : 'Notepad'} here`}>This server predates the {book} tab: update bearclaw and restart its web server.</Empty>
+  ) : !hosts.length ? (
     <Empty title="No notes configured">
       Point a host at a folder of markdown notes: <code className="font-mono">bearclaw config set web.notes.root ~/notes</code>, then restart its web server.
     </Empty>
@@ -195,6 +221,7 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
           highlight={q.trim() ? highlight : []}
           scrollToHit={hitPath === loc.path}
           desktop={pane}
+          onSaved={refresh}
           header={
             pane ? undefined : (
               <ScreenHeader>
@@ -270,11 +297,18 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
   return (
     <div ref={screenRef} className="flex min-h-app flex-col bg-background">
       <ScreenHeader>
-        <div className="-ml-2 flex min-h-8 items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="Back" onClick={() => navigate('/')} className="-my-1.5 size-11 shrink-0 rounded-xl">
-            <ChevronLeftIcon className="size-6" />
-          </Button>
+        <div className={cn('flex min-h-8 items-center gap-1', book === 'notes' && '-ml-2')}>
+          {book === 'notes' ? (
+            <Button variant="ghost" size="icon" aria-label="Back" onClick={() => navigate('/')} className="-my-1.5 size-11 shrink-0 rounded-xl">
+              <ChevronLeftIcon className="size-6" />
+            </Button>
+          ) : null}
           <h1 className="min-w-0 flex-1 truncate text-xl font-bold tracking-tight">{tree?.name ?? 'Notes'}</h1>
+          {book !== 'notes' && host ? (
+            <Button variant="outline" size="sm" onClick={() => void newNote()}>
+              <PlusIcon /> New
+            </Button>
+          ) : null}
         </div>
         <div className="mt-2 flex flex-col gap-2">
           {searchField}

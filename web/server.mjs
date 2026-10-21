@@ -147,7 +147,8 @@ const push = createPush({
   listSessions: async () => {
     const warm = bearclawAccess.peekBearclaw();
     const body = warm && Date.now() - warm.snapshotAt < 10_000 ? warm : await bearclawAccess.buildBearclaw();
-    return body.hosts.filter((h) => h.ok).flatMap((h) => h.sessions.map((s) => ({ ...s, host: h.name })));
+    // Claw and the voice operator are talked to, not watched: no notification on every reply.
+    return body.hosts.filter((h) => h.ok).flatMap((h) => h.sessions.filter((s) => !s.claw && !s.operator).map((s) => ({ ...s, host: h.name })));
   },
   lastReply: async (s) => {
     if (s.host !== config.self) return null;
@@ -175,6 +176,8 @@ const handleApi = createApi({
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   completer: createCompleter({ home: os.homedir(), run }),
   notes: createNotes({ config: config.notes, home: os.homedir(), run }),
+  // The dashboard's Brain and Notepad tabs: the same explorer over ~/brain and ~/notes, writable.
+  books: Object.fromEntries(Object.entries(config.books).map(([id, c]) => [id, createNotes({ config: c, home: os.homedir(), run })])),
   // Settings → Start directories: writes through `bearclaw config set`, hot-reloads config.spawnDirs.
   spawnDirs: createSpawnDirsEditor({ config, configFile: config.configFile ?? configPath(process.env), cli }),
   // Settings → Git repos: `bearclaw --local repos …` + `bearclaw config set repos`.

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronLeftIcon, KeyboardIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react'
+import { KeyboardIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { NotificationSettings } from '@/components/NotificationSettings'
@@ -184,10 +184,8 @@ export function SettingsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pan
   return (
     <div ref={screenRef} className="flex min-h-app flex-col bg-background">
       <ScreenHeader>
-        <div className="-ml-2 flex min-h-8 items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="Back" onClick={back} className="-my-1.5 size-11 shrink-0 rounded-xl">
-            <ChevronLeftIcon className="size-6" />
-          </Button>
+        {/* A tab on the phone (the tab row above): no back button. */}
+        <div className="flex min-h-8 items-center gap-1">
           <h1 className="text-xl font-bold tracking-tight">Settings</h1>
         </div>
       </ScreenHeader>

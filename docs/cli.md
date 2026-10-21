@@ -291,9 +291,17 @@ button at the right end of the tab bar, on any tab — reloads now):
 | Tasks | your open [Productive](https://productive.io) tasks — only those assigned to you right now (each task's assignee is checked: the API's assignee filter lags) — grouped by workflow status in board order (`g` switches to grouping by project), due date first within a group (overdue red) · Enter (or `o`) opens the task in Productive in the browser |
 
 The Tasks tab reads `productive.organizationId` (required — `bearclaw config set productive.organizationId '"<id>"'`),
-`productive.tokenEnv` (the env var holding your API token, default `PRODUCTIVE_AUTH_TOKEN`), and
-optionally `productive.apiUrl` / `productive.appUrl`. Your person id comes from the token's
-membership in that organization.
+`productive.tokenEnv` (the env var holding your API token, default `PRODUCTIVE_AUTH_TOKEN`; on
+macOS a Keychain generic password of that name works too, which is how the web server, started by
+launchd without your shell profile, finds it), and optionally `productive.apiUrl` /
+`productive.appUrl`. Your person id comes from the token's membership in that organization.
+`bearclaw tasks [--json]` prints the same list (`{ "tasks": [{ id, number, title, project, status,
+dueDate, updatedAt, url, description, statusCategory }] }`), for the web app's Tasks tab.
+
+The Claw tab's session is `bearclaw claw start [--json]`: it finds Claw's tmux session (`claw`,
+marked as ours) or starts it in its workspace (`bearclaw claw path`, `$BEARCLAW_CLAW_DIR`, else
+`${XDG_STATE_HOME:-~/.local/state}/bearclaw/claw`) and prints it (`{ "session", "dir" }`), for the
+web app's Claw tab.
 
 Run it in a tmux session named `bearclaw` and bind `prefix f` to `switch-client -t bearclaw` to jump back
 after focusing a session (see [setup.md](setup.md#4-tmux)).

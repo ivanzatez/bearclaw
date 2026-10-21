@@ -468,9 +468,56 @@ export function createBearclawCli({ run, bin = 'bearclaw', timeoutMs = 8000 } = 
   const stackSync = ({ input = null } = {}) =>
     stack(['sync', ...(input ? ['--input', '-'] : [])], { ...(input ? { input: JSON.stringify(input) } : {}) });
 
+  /** A `--json` command: its parsed object. Throws BearclawCliError with the CLI's last stderr line (`missing`: an older CLI without it). */
+  async function jsonCommand(args, what, t) {
+    let stdout;
+    try {
+      ({ stdout } = await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } }));
+    } catch (err) {
+      const e = wrap(err, what, t);
+      const why = String(err?.stderr ?? '')
+        .split('\n')
+        .filter((l) => l.trim() && !l.startsWith('warning:'))
+        .pop()
+        ?.replace(/^(bearclaw:\s*)?(Error:\s*)?/i, '')
+        .trim();
+      if (why && !e.timedOut) e.message = why;
+      e.missing = !e.timedOut && /unrecognized subcommand/i.test(String(err?.stderr ?? ''));
+      throw e;
+    }
+    return parseObject(stdout, what);
+  }
+
+  /** Claw, the dashboard's operator: `bearclaw --local claw start --json` → `{ session, dir }` (found, or started in tmux). */
+  const clawStart = ({ timeoutMs: t = 30 * 1000 } = {}) => jsonCommand(['--local', 'claw', 'start', '--json'], 'bearclaw claw start', t);
+
+  /** Your open Productive tasks: `bearclaw --local tasks --json` → `{ tasks: [...] }`. */
+  const tasks = ({ timeoutMs: t = 60 * 1000 } = {}) => jsonCommand(['--local', 'tasks', '--json'], 'bearclaw tasks', t);
+
+  /** The todo: `bearclaw --local todo list --json` → `{ version, nextId, items: [...] }`. */
+  const todo = ({ timeoutMs: t = 10 * 1000 } = {}) => jsonCommand(['--local', 'todo', 'list', '--json'], 'bearclaw todo', t);
+
+  /** Change the todo: `add <text> [--task <url>]`, `done <id>`, `rm <id>`; resolves the list after it. */
+  async function todoEdit({ op, text, task, id, timeoutMs: t = 10 * 1000 }) {
+    const args = op === 'add' ? ['--local', 'todo', 'add', text, ...(task ? ['--task', task] : [])] : ['--local', 'todo', op, String(id)];
+    try {
+      await run(bin, args, { timeout: t, env: { ...process.env, NO_COLOR: '1' } });
+    } catch (err) {
+      const e = wrap(err, `bearclaw todo ${op}`, t);
+      const why = String(err?.stderr ?? '').trim().split('\n').pop()?.replace(/^(bearclaw:\s*)?(Error:\s*)?/i, '').trim();
+      if (why && !e.timedOut) e.message = why;
+      throw e;
+    }
+    return todo();
+  }
+
   return {
     bin,
     list,
+    clawStart,
+    tasks,
+    todo,
+    todoEdit,
     nameAll,
     nameOne,
     rename,
