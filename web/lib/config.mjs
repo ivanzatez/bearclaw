@@ -210,7 +210,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
- *     restore: { onBoot, markerFile }, configFile, configFound }
+ *     restore: { onBoot, markerFile }, push: { dir }, configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -490,6 +490,9 @@ export function normalizeConfig(
   if (rs.onBoot != null && typeof rs.onBoot !== 'boolean') throw new Error('config.restore.onBoot must be true or false');
   const restore = { onBoot: rs.onBoot === true, markerFile: path.join(bearclawStateDir(env, home), 'web-restored-boot') };
 
+  // Push notifications (lib/push.mjs): the VAPID keys and the subscribed devices.
+  const push = { dir: path.join(bearclawStateDir(env, home), 'push') };
+
   return {
     self: self.trim(),
     port,
@@ -523,6 +526,7 @@ export function normalizeConfig(
     stacks,
     restore,
     operator,
+    push,
   };
 }
 

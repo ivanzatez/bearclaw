@@ -195,6 +195,19 @@ export interface Settings {
   speak?: { enabled: boolean; voice?: string | null }
   /** The voice operator (GET/POST /api/operator) is available on this server (older servers: absent). */
   operator?: { enabled: boolean; hosts?: string[] }
+  /** Push notifications (/api/push…): `publicKey` is the VAPID key devices subscribe with (older servers: absent). */
+  push?: { enabled: boolean; publicKey?: string }
+}
+
+/** GET /api/push, POST /api/push/subscribe — this device's notification preferences on the server. */
+export interface PushDevice {
+  subscribed: boolean
+  /** Which session events notify this device. */
+  events?: { waiting: boolean; done: boolean }
+  /** Hold notifications while the server's machine has keyboard or mouse input. */
+  awayOnly?: boolean
+  lastSentAt?: number | null
+  lastError?: string | null
 }
 
 /** GET/POST /api/operator — this server's operator session (null until it shows in the bearclaw). */

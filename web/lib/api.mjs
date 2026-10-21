@@ -141,6 +141,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   jobs        lib/jobs.mjs#createJobs (GET jobs[/:name], POST jobs/:name/run|enabled; absent → 501)
  *   stacks      lib/stacks.mjs#createStacks (…/stacks routes, sibling spawn, sync after kill; absent → 501)
  *   dormant     lib/dormant.mjs#createDormant (…/dormant routes: list / restore / forget; absent → 501)
+ *   push        lib/push.mjs instance (/api/push…, settings.push; absent → 501)
  *   grouper     lib/grouping.mjs instance when THIS host runs grouping (absent → proxy to the
  *               grouping host, or a disabled response)
  *   warmBearclaw   keep the merged /api/bearclaw warm in the background (lib/snapshot.mjs)
@@ -174,6 +175,7 @@ export function createApi({
   stacks = null,
   dormant = null,
   grouper = null,
+  push = null,
   groupingDiscoveryMs = 5 * 60 * 1000,
   name = 'bearclaw-web',
   version = '0.0.0',
@@ -552,6 +554,23 @@ export function createApi({
     throw new HttpError('method not allowed', 405);
   }
 
+  async function handlePush(req, url) {
+    if (!push) throw new HttpError('push notifications are not available on this server', 501);
+    if (url.pathname === '/api/push') {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return { status: 200, body: await push.device(url.searchParams.get('endpoint') ?? '') };
+    }
+    const action = url.pathname.slice('/api/push/'.length);
+    if (!['subscribe', 'unsubscribe', 'presence', 'test'].includes(action)) throw new HttpError('not found', 404);
+    if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+    const body = (await readJsonBody(req)) ?? {};
+    if (action === 'subscribe') return { status: 200, body: await push.subscribe(body) };
+    if (typeof body.endpoint !== 'string' || !body.endpoint) throw new HttpError('endpoint is required', 400);
+    if (action === 'unsubscribe') return { status: 200, body: await push.unsubscribe(body.endpoint) };
+    if (action === 'presence') return { status: 200, body: push.presence(body.endpoint, body.visible) };
+    return { status: 200, body: await push.test(body.endpoint) };
+  }
+
   async function handleApi(req, url) {
     if (url.pathname === '/api/health') {
       return {
@@ -571,6 +590,7 @@ export function createApi({
           },
           briefs: briefs?.status() ?? { enabled: false },
           stacks: stacks?.status() ?? { sync: false, lastSync: null },
+          push: push?.status() ?? { devices: 0, watching: false, lastEvent: null },
         },
       };
     }
@@ -593,6 +613,7 @@ export function createApi({
           notes: notes ? { enabled: true, name: notes.name ?? null } : { enabled: false },
           // `generate`: whether creating a stack calls the model (the CLI's `stacks.enabled`).
           stacks: { enabled: Boolean(stacks), model: config.stacks?.model ?? DEFAULT_STACKS_MODEL, generate: config.stacks?.generate !== false },
+          push: push ? { enabled: true, publicKey: await push.publicKey() } : { enabled: false },
         },
       };
     }
@@ -620,6 +641,9 @@ export function createApi({
         stream: Readable.from([audio]),
       };
     }
+
+    // Push notifications: always this server (the origin the device subscribed on).
+    if (url.pathname === '/api/push' || url.pathname.startsWith('/api/push/')) return handlePush(req, url);
 
     // The voice operator (GET: is it running; POST: find or start it) — on the first host of
     // web.operator.hosts that answers: this server's own, or a peer's (proxied, ?local=1).

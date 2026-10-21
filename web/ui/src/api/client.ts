@@ -46,6 +46,7 @@ import type {
   StackView,
   TranscribeResponse,
   OperatorStatus,
+  PushDevice,
   UploadResponse,
   PrSpawnResponse,
   PrWorktree,
@@ -199,6 +200,14 @@ export const api = {
   },
   operator: (o: Opts = {}) => request<OperatorStatus>('/api/operator', o),
   startOperator: (o: Opts = {}) => request<OperatorStatus>('/api/operator', { ...o, method: 'POST', body: {} }),
+
+  pushDevice: (endpoint: string, o: Opts = {}) => request<PushDevice>(`/api/push?endpoint=${enc(endpoint)}`, o),
+  pushSubscribe: (body: { subscription: PushSubscriptionJSON; events?: Partial<NonNullable<PushDevice['events']>>; awayOnly?: boolean }, o: Opts = {}) =>
+    request<PushDevice>('/api/push/subscribe', { ...o, method: 'POST', body }),
+  pushUnsubscribe: (endpoint: string, o: Opts = {}) => request<PushDevice>('/api/push/unsubscribe', { ...o, method: 'POST', body: { endpoint } }),
+  pushPresence: (endpoint: string, visible: boolean, o: Opts & { keepalive?: boolean } = {}) =>
+    request<OkResponse>('/api/push/presence', { ...o, method: 'POST', body: { endpoint, visible } }),
+  pushTest: (endpoint: string, o: Opts = {}) => request<OkResponse>('/api/push/test', { ...o, method: 'POST', body: { endpoint } }),
 
   /** Store a file on `host`; the response carries its absolute path there. */
   upload: (host: string, file: Blob, name: string, o: Opts = {}) =>

@@ -33,6 +33,7 @@ import { createStacks } from './lib/stacks.mjs';
 import { fetchPeerHost } from './lib/peers.mjs';
 import { createDormant } from './lib/dormant.mjs';
 import { createMemos } from './lib/memos.mjs';
+import { createIdleProbe, createPush } from './lib/push.mjs';
 import { createApi } from './lib/api.mjs';
 import { createHttpServer } from './lib/app.mjs';
 
@@ -137,11 +138,30 @@ const transcriber = createTranscriber({ getKey: transcribeKey, log });
 const memos = createMemos({ ...config.memos, transcriber, ask: createClaudeAsk({ bin: claudeBin, run }), log });
 const spawner = createSpawner({ run, tmux: config.tmux, launcher: config.claude, launchers: config.launchers });
 const operator = createOperator({ config, bearclaw, spawner, backend, log });
+// Push notifications: phones that subscribed hear when a session waits on them or finishes.
+// The merged bearclaw (the warm snapshot while someone is watching, else a fresh build), so a
+// peer's sessions count too.
+const transcripts = createTranscriptReader();
+const push = createPush({
+  dir: config.push.dir,
+  listSessions: async () => {
+    const warm = bearclawAccess.peekBearclaw();
+    const body = warm && Date.now() - warm.snapshotAt < 10_000 ? warm : await bearclawAccess.buildBearclaw();
+    return body.hosts.filter((h) => h.ok).flatMap((h) => h.sessions.map((s) => ({ ...s, host: h.name })));
+  },
+  lastReply: async (s) => {
+    if (s.host !== config.self) return null;
+    const r = await transcripts.messages(s, 8);
+    return r?.messages.findLast((m) => m.role === 'assistant') ?? null;
+  },
+  idleMs: createIdleProbe({ run }),
+  log,
+});
 const handleApi = createApi({
   config,
   bearclaw,
   backend,
-  transcripts: createTranscriptReader(),
+  transcripts,
   spawner,
   killer: createKiller({ run, tmux: config.tmux, closeIterm: (s) => backend.closeIterm(s) }),
   cli,
@@ -165,6 +185,7 @@ const handleApi = createApi({
   stacks,
   dormant,
   grouper,
+  push,
   name: NAME,
   version: VERSION,
   logError,
@@ -190,6 +211,8 @@ server.listen(config.port, config.bind, () => {
     log('[bearclaw-web] autoname off (web.autoName.enabled = false)');
   }
   uploader.start();
+  push.start();
+  log(`[bearclaw-web] push notifications: ${config.push.dir}`);
   // A running operator keeps its workspace current (its ./api helper names this server's port).
   operator.prepare().catch((err) => logError(err, 'operator workspace'));
   operator.start();
@@ -246,6 +269,7 @@ function shutdown(signal) {
   stacks.stop();
   operator.stop();
   uploader.stop();
+  push.stop();
   handleApi.stop();
   const timer = setTimeout(() => process.exit(0), 3000);
   timer.unref?.();
