@@ -99,6 +99,12 @@ const PR_CHECKOUT_PROXY_MS = 5 * 60 * 1000;
 /** A PR fetch is four `gh` searches, up to 4 pages each: give a peer as long as its CLI gets. */
 const PRS_PROXY_MS = 130 * 1000;
 const HARNESSES_ROUTE = /^\/api\/hosts\/([^/]+)\/harnesses$/;
+/** A saved note's JSON body: the note (≤ 2 MB, lib/notes.mjs) plus room for escaping. */
+const NOTE_SAVE_LIMIT = 6 * 1024 * 1024;
+const TODO_ROUTE = /^\/api\/hosts\/([^/]+)\/todo$/;
+const TASKS_ROUTE = /^\/api\/hosts\/([^/]+)\/tasks$/;
+/** A todo line, as `bearclaw todo add` takes it. */
+const TODO_TEXT_MAX = 300;
 /** `bearclaw harness list` runs `pi --list-models` (a node start): keep its answer a while. */
 const HARNESSES_TTL_MS = 10 * 60 * 1000;
 const DORMANT_ROUTE = /^\/api\/hosts\/([^/]+)\/dormant(?:\/(restore|forget))?$/;
@@ -136,6 +142,7 @@ export const DEFAULT_QUICK_REPLIES = [
  *   completer   lib/complete.mjs instance (…/complete: composer autocomplete; absent → 501)
  *   briefs      lib/briefs.mjs instance (brief, brief/regenerate; absent → 501)
  *   notes       lib/notes.mjs instance (notes/tree|search|file|raw; absent → 501: web.notes.root unset)
+ *   books       { brain, notepad }: writable lib/notes.mjs instances, the same routes with `?book=<id>` (+ PUT notes/file)
  *   spawnDirs   lib/spawn-dirs.mjs#createSpawnDirsEditor (GET/PUT spawn-dirs; absent → 501)
  *   repos       lib/repos.mjs#createRepos (GET/PUT repos, POST repos/sync|service; absent → 501)
  *   jobs        lib/jobs.mjs#createJobs (GET jobs[/:name], POST jobs/:name/run|enabled; absent → 501)
@@ -169,6 +176,7 @@ export function createApi({
   completer = null,
   briefs = null,
   notes = null,
+  books = {},
   spawnDirs = null,
   repos = null,
   jobs = null,
@@ -195,11 +203,18 @@ export function createApi({
   answerKeyGapMs = 80,
 }) {
   // Each host advertises whether it has a notes explorer (like its spawnDirs).
-  const notesInfo = () => (notes ? { notes: { name: notes.name ?? null } } : {});
+  const notesExplorer = notes;
+  const bookIds = Object.keys(books).filter((id) => books[id]);
+  const notesInfo = () => ({ ...(notes ? { notes: { name: notes.name ?? null } } : {}), ...(bookIds.length ? { books: bookIds } : {}) });
   // …and its session stacks, compact, so a peer can stamp the rows of their members on its side.
   const stacksInfo = () => (stacks ? { stacks: stacks.compact() } : {});
+  // …and Claw's row (`claw: true`: the dashboard's operator, in its workspace), which the UI shows
+  // in the Claw tab instead of the session list.
+  const clawDir = config.claw?.dir ? path.resolve(config.claw.dir) : null;
+  const isClaw = (s) => Boolean(clawDir && typeof s?.cwd === 'string' && path.resolve(s.cwd) === clawDir);
+  const stampClaw = (host) => (Array.isArray(host?.sessions) && host.sessions.some(isClaw) ? { ...host, sessions: host.sessions.map((s) => (isClaw(s) ? { ...s, claw: true } : s)) } : host);
   // …and marks its voice operator's row (`operator: true`), which the UI keeps out of session lists.
-  const stampOperator = (host) => (operator ? operator.stamp(host) : host);
+  const stampOperator = (host) => stampClaw(operator ? operator.stamp(host) : host);
 
   async function buildBearclaw({ force = false } = {}) {
     const selfHost = stampOperator({ ...(await bearclaw.localHost({ force })), spawnDirs: config.spawnDirs, ...notesInfo(), ...stacksInfo() });
@@ -614,6 +629,8 @@ export function createApi({
           // `generate`: whether creating a stack calls the model (the CLI's `stacks.enabled`).
           stacks: { enabled: Boolean(stacks), model: config.stacks?.model ?? DEFAULT_STACKS_MODEL, generate: config.stacks?.generate !== false },
           push: push ? { enabled: true, publicKey: await push.publicKey() } : { enabled: false },
+          claw: { enabled: typeof cli?.clawStart === 'function', dir: clawDir },
+          prs: { reviewPrompt: config.reviewPrompt ?? null },
         },
       };
     }
@@ -641,6 +658,9 @@ export function createApi({
         stream: Readable.from([audio]),
       };
     }
+
+    // Claw (the dashboard's operator): GET its row on this host, POST finds or starts it.
+    if (url.pathname === '/api/claw') return handleClaw(req);
 
     // Push notifications: always this server (the origin the device subscribed on).
     if (url.pathname === '/api/push' || url.pathname.startsWith('/api/push/')) return handlePush(req, url);
@@ -798,6 +818,18 @@ export function createApi({
       return forHost({ req, url, host: decodeURIComponent(hr[1]), local: () => localHarnesses(url) });
     }
 
+    const td = TODO_ROUTE.exec(url.pathname);
+    if (td) {
+      if (req.method !== 'GET' && req.method !== 'POST') throw new HttpError('method not allowed', 405);
+      return forHost({ req, url, host: decodeURIComponent(td[1]), local: () => localTodo(req) });
+    }
+
+    const tk = TASKS_ROUTE.exec(url.pathname);
+    if (tk) {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return forHost({ req, url, host: decodeURIComponent(tk[1]), timeoutMs: 70 * 1000, local: () => localTasks() });
+    }
+
     const us = USAGE_ROUTE.exec(url.pathname);
     if (us) {
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
@@ -936,9 +968,9 @@ export function createApi({
     const n = NOTES_ROUTE.exec(url.pathname);
     if (n) {
       const [, rawHost, action] = n;
-      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      if (req.method !== 'GET' && !(req.method === 'PUT' && action === 'file')) throw new HttpError('method not allowed', 405);
       const host = decodeURIComponent(rawHost);
-      const r = await forHost({ req, url, host, streamResponse: action === 'raw', local: () => localNotes(action, url) });
+      const r = await forHost({ req, url, host, streamResponse: action === 'raw', local: () => localNotes(action, url, req), bodyLimit: NOTE_SAVE_LIMIT });
       // Editor links are built by the server the browser asked (its `web.editor` and ssh aliases).
       if (r.status === 200 && r.body && !r.stream) {
         if (action === 'tree') return { ...r, body: { ...r.body, editorUrl: editorUrl(editorViewer(config, req), host, r.body.rootAbs) } };
@@ -950,8 +982,16 @@ export function createApi({
     throw new HttpError('not found', 404);
   }
 
-  async function localNotes(action, url) {
+  async function localNotes(action, url, req) {
+    const book = url.searchParams.get('book');
+    const notes = book ? books[book] : notesExplorer;
+    if (book && !notes) throw new HttpError(`no such notes on this host: ${book}`, 404);
     if (!notes) throw new HttpError('notes are not configured on this host (web.notes.root)', 501);
+    if (req?.method === 'PUT') {
+      const body = (await readJsonBody(req, NOTE_SAVE_LIMIT)) ?? {};
+      const mtime = Number.isInteger(body.mtime) ? body.mtime : null;
+      return { status: 200, body: { host: config.self, ...(await notes.write(url.searchParams.get('path'), body.text, { mtime })) } };
+    }
     if (action === 'tree') return { status: 200, body: { host: config.self, ...(await notes.tree()) } };
     if (action === 'search') {
       const limit = clampLines(url.searchParams.get('limit'), 50, 1, 200);
@@ -1101,6 +1141,61 @@ export function createApi({
     } catch (err) {
       if (err?.missing) throw new HttpError('this host’s bearclaw CLI has no `pr seen` command — update it', 501);
       throw new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+    }
+  }
+
+  const cliFailure = (err, what) => {
+    if (err?.missing) return new HttpError(`this host's bearclaw has no \`${what}\` (update it)`, 501);
+    return new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
+  };
+
+  async function handleClaw(req) {
+    if (req.method !== 'GET' && req.method !== 'POST') throw new HttpError('method not allowed', 405);
+    if (typeof cli?.clawStart !== 'function') throw new HttpError('Claw is not available on this server', 501);
+    const find = async (force) => {
+      const host = stampClaw(await bearclaw.localHost({ force }));
+      return host.ok ? (host.sessions.find((s) => s.claw) ?? null) : null;
+    };
+    if (req.method === 'GET') return { status: 200, body: { host: config.self, dir: clawDir, session: await find(false) } };
+    let started;
+    try {
+      started = await cli.clawStart();
+    } catch (err) {
+      throw cliFailure(err, 'claw');
+    }
+    // A fresh Claude takes a few seconds to register; the UI polls GET until the row shows.
+    refreshBearclaw();
+    return { status: 200, body: { host: config.self, dir: clawDir, session: await find(true), tmuxSession: started.session ?? null } };
+  }
+
+  async function localTodo(req) {
+    if (typeof cli?.todo !== 'function') throw new HttpError('the todo is not available on this server', 501);
+    try {
+      if (req.method === 'GET') return { status: 200, body: { host: config.self, ...(await cli.todo()) } };
+      const body = (await readJsonBody(req)) ?? {};
+      if (body.op === 'add') {
+        const text = typeof body.text === 'string' ? body.text.replace(/\s+/g, ' ').trim() : '';
+        if (!text || text.length > TODO_TEXT_MAX) throw new HttpError(`text must be one line of 1..${TODO_TEXT_MAX} characters`, 400);
+        const task = typeof body.task === 'string' && /^https?:\/\/\S+$/.test(body.task.trim()) ? body.task.trim() : null;
+        return { status: 200, body: { host: config.self, ...(await cli.todoEdit({ op: 'add', text, task })) } };
+      }
+      if (body.op === 'done' || body.op === 'rm') {
+        if (!Number.isInteger(body.id) || body.id < 1) throw new HttpError('id must be a todo item number', 400);
+        return { status: 200, body: { host: config.self, ...(await cli.todoEdit({ op: body.op, id: body.id })) } };
+      }
+      throw new HttpError('op must be add, done or rm', 400);
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw cliFailure(err, 'todo');
+    }
+  }
+
+  async function localTasks() {
+    if (typeof cli?.tasks !== 'function') throw new HttpError('tasks are not available on this server', 501);
+    try {
+      return { status: 200, body: { host: config.self, ...(await cli.tasks()) } };
+    } catch (err) {
+      throw cliFailure(err, 'tasks');
     }
   }
 

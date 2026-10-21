@@ -20,7 +20,7 @@ function readChoice(): ThemeChoice {
 
 /**
  * Toggles the `dark` class on <html> (shadcn's convention) and sets `data-palette` (none for
- * Default). index.html sets both before first paint with the same rules, so there is no flash.
+ * the Default palette's tokens). index.html sets both before first paint with the same rules, so there is no flash.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeChoice>(readChoice)
@@ -32,7 +32,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement
     root.classList.toggle('dark', resolved === 'dark')
     root.style.colorScheme = resolved
-    if (palette === DEFAULT_PALETTE) delete root.dataset.palette
+    if (palette === 'default') delete root.dataset.palette
     else root.dataset.palette = palette
     // The PWA status bar / overscroll colour: the palette's --background.
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor(palette, resolved))

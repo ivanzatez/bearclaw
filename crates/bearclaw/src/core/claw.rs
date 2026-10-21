@@ -138,6 +138,59 @@ pub fn is_claw(s: &Session, dir: &Path) -> bool {
         .is_some_and(|c| Path::new(c.trim_end_matches('/')) == dir)
 }
 
+/// Prepare Claw's workspace, then reuse its running session or start one. A `claw` session that
+/// isn't ours is left alone.
+pub fn find_or_start() -> std::result::Result<String, String> {
+    use crate::core::backend;
+    use crate::core::harness::Harness;
+    let dir = dir();
+    prepare(&dir).map_err(|e| e.to_string())?;
+    let target = format!("={}:", SESSION);
+    let tmux = |args: &[&str]| {
+        crate::core::tools::tmux_cmd()
+            .args(args)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    if tmux(&["has-session", "-t", &format!("={}", SESSION)]).is_some() {
+        // Ours: marked, or (started before the mark existed) running in the workspace.
+        let marked = tmux(&["show-options", "-qv", "-t", &target, MARK]).as_deref() == Some("1");
+        let here = tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "#{pane_current_path}",
+        ]);
+        if !marked && here.as_deref().map(std::path::Path::new) != Some(dir.as_path()) {
+            return Err(format!(
+                "a tmux session called `{}` exists and isn't Claw — rename it, then r",
+                SESSION
+            ));
+        }
+        tmux(&["set-option", "-t", &target, MARK, "1"]);
+        return Ok(SESSION.to_string());
+    }
+    let (_, ts) = backend::spawn_tagged(
+        crate::core::discovery::Backend::Tmux,
+        &dir.display().to_string(),
+        backend::Prompt::None,
+        None,
+        Some(SESSION),
+        false,
+        &launcher(&Harness::Claude.command()),
+        Harness::Claude,
+        None,
+    )
+    .map_err(|e| e.to_string())?;
+    let ts = ts.unwrap_or_else(|| SESSION.to_string());
+    tmux(&["set-option", "-t", &format!("={ts}:"), MARK, "1"]);
+    Ok(ts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

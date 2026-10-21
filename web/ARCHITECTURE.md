@@ -49,6 +49,7 @@ lib/dormant.mjs       dormant + recently closed sessions (session recovery): `be
 lib/stacks.mjs        session stacks: `bearclaw stack` errors → HTTP, sibling spawn dir rule, post-spawn `stack add`, background `stack sync`
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
+lib/notes.mjs         (also) the writable Brain / Notepad books: `?book=` on the notes routes, `write()` for PUT notes/file
 lib/push.mjs          push notifications: VAPID keys, devices, RFC 8291 encryption, the waiting/done watcher (docs/architecture.md → Push notifications)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
@@ -482,6 +483,8 @@ Session stacks) and the server only shells out to `bearclaw --local stack … --
   (`stampForeign`), so the UI shows one stack across hosts and talks to the home host for it.
 
 ## UI (`ui/`, React)
+
+On the phone every top-level screen starts with the terminal dashboard's tab row: Sessions `#/`, Claw `#/claw` (Claw's chat under its character card), PRs `#/prs`, Tasks `#/tasks`, Todo `#/todo`, Usage `#/usage`, Brain `#/brain[/…]`, Notepad `#/notepad[/…]`, Settings `#/settings`. The default palette is Claw, the dashboard's look (monospace, its colours).
 
 The list and session detail (Chat | Term, composer with quick replies, key chips and autocomplete — `/skill` at the start or mid-sentence in Claude sessions, `@file` for the cwd's `.md` / `.plain` files, `brain:note`; ↑↓, Tab/Enter, Esc), plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
 size for the whole UI, theme (colour palette: Default / Earth / Dusk, `bearclaw.palette`), light/dark mode, terminal text,

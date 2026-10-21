@@ -1,6 +1,6 @@
 // Notes explorer helpers (pure): the folder tree, `#/notes/…` routes, note-to-note links
 // (relative markdown links and `[[wiki]]` links) and search-match highlighting.
-import type { NoteEntry } from '@/api/types'
+import type { NoteEntry, NotesBook } from '@/api/types'
 import { basename, dirname, normalizePath } from '@/lib/paths'
 
 export interface TreeDir {
@@ -54,14 +54,14 @@ export function ancestorDirs(path: string): string[] {
 const encPath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
 
 /** `#/notes`, `#/notes/<host>`, `#/notes/<host>/<path…>` (segments encoded). */
-export function notesHref(host?: string | null, path?: string | null): string {
-  if (!host) return '/notes'
-  return path ? `/notes/${encodeURIComponent(host)}/${encPath(path)}` : `/notes/${encodeURIComponent(host)}`
+export function notesHref(host?: string | null, path?: string | null, book: NotesBook = 'notes'): string {
+  if (!host) return `/${book}`
+  return path ? `/${book}/${encodeURIComponent(host)}/${encPath(path)}` : `/${book}/${encodeURIComponent(host)}`
 }
 
-/** A hash location → the explorer's host + note path, or null when it is not a notes route. */
-export function parseNotesLocation(location: string): { host: string | null; path: string | null } | null {
-  const m = /^\/notes(?:\/([^/]*)(?:\/(.*))?)?\/?$/.exec(location)
+/** A hash location → the explorer's host + note path, or null when it is not that notebook's route (`/notes`, `/brain`, `/notepad`). */
+export function parseNotesLocation(location: string, book: NotesBook = 'notes'): { host: string | null; path: string | null } | null {
+  const m = new RegExp(`^/${book}(?:/([^/]*)(?:/(.*))?)?/?$`).exec(location)
   if (!m) return null
   let host: string | null = null
   try {

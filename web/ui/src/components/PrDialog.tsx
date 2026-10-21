@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { CodeXmlIcon, ExternalLinkIcon, FolderGit2Icon, GitBranchIcon, Loader2Icon, PlayIcon } from 'lucide-react'
+import { CodeXmlIcon, ExternalLinkIcon, FolderGit2Icon, GitBranchIcon, Loader2Icon, PlayIcon, ScanSearchIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLocation } from 'wouter'
 
-import { api } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import type { PullRequest, Session } from '@/api/types'
 import { watchForSpawned } from '@/api/spawnWatch'
 import { HostDot } from '@/components/HostBadge'
@@ -16,16 +16,19 @@ import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useBearclaw } from '@/hooks/useBearclaw'
+import { useSettings } from '@/hooks/useSettings'
+import { nextReviewName, reviewName, reviewPromptFor } from '@/lib/prReview'
 import { editorLabel } from '@/lib/brief'
 import { copyText } from '@/lib/clipboard'
 import { shortCwd } from '@/lib/format'
 import { CHECKS_LABEL, checksTone, prRef, promptChips } from '@/lib/prs'
-import { sessionHref } from '@/lib/sessions'
+import { allSessions, sessionHref } from '@/lib/sessions'
 import { isMacPlatform, isSubmitChord } from '@/lib/shortcuts'
 
 /**
  * One PR's actions on `host`: start a session on it (checked out in a worktree first, the
- * session told what the PR is and where), just check it out, or open it on GitHub. Key it by
+ * session told what the PR is and where), start a code review session on it (like the terminal
+ * dashboard's Shift+R), just check it out, or open it on GitHub. Key it by
  * the PR so a new PR starts with a fresh form.
  */
 export function PrDialog({
@@ -43,9 +46,10 @@ export function PrDialog({
   onChanged: () => void
 }) {
   const [, navigate] = useLocation()
-  const { applyBearclaw } = useBearclaw()
+  const { bearclaw, applyBearclaw, refresh: refreshBearclaw } = useBearclaw()
+  const { reviewPrompt } = useSettings()
   const [prompt, setPrompt] = useState('')
-  const [busy, setBusy] = useState<null | 'spawn' | 'checkout'>(null)
+  const [busy, setBusy] = useState<null | 'spawn' | 'checkout' | 'review'>(null)
   const [error, setError] = useState<string | null>(null)
   if (!pr || !host) return null
   const ref = prRef(pr)
@@ -71,6 +75,36 @@ export function PrDialog({
       setBusy(null)
     } catch (err) {
       setError((err as Error)?.message || 'Checkout failed')
+      setBusy(null)
+    }
+  }
+
+  // A review session, as the dashboard's Shift+R: in the first start directory, in the
+  // background — the card links it once it registers.
+  const reviewDir = bearclaw?.hosts.find((h) => h.name === host)?.spawnDirs?.[0]?.path ?? null
+  const review = async () => {
+    if (busy || !reviewPrompt) return
+    setBusy('review')
+    setError(null)
+    const taken = new Set(allSessions(bearclaw).map((s) => s.tmux_session ?? ''))
+    let name = nextReviewName(reviewName(pr), taken)
+    try {
+      for (let tries = 0; ; tries++) {
+        try {
+          await api.spawn(host, { name, dir: reviewDir ?? undefined, prompt: reviewPromptFor(pr, reviewPrompt) })
+          break
+        } catch (err) {
+          // A tmux session of that name without Claude in it (not in the list): the next name.
+          if (!(err instanceof ApiError && err.status === 409) || tries >= 5) throw err
+          taken.add(name)
+          name = nextReviewName(reviewName(pr), taken)
+        }
+      }
+      toast.success(`Review started: ${name}`, { description: 'The card links it once it is up' })
+      refreshBearclaw()
+      onClose()
+    } catch (err) {
+      setError((err as Error)?.message || 'Could not start the review')
       setBusy(null)
     }
   }
@@ -228,6 +262,11 @@ export function PrDialog({
               <ExternalLinkIcon /> GitHub
             </a>
           </Button>
+          {reviewPrompt ? (
+            <Button variant="outline" size="sm" onClick={() => void review()} disabled={!!busy} title={reviewDir ? `A review session in ${shortCwd(reviewDir)}` : 'A review session'}>
+              {busy === 'review' ? <Loader2Icon className="animate-spin" /> : <ScanSearchIcon />} Review
+            </Button>
+          ) : null}
           {!worktree && pr.local ? (
             <Button variant="outline" size="sm" onClick={() => void checkout()} disabled={!!busy}>
               {busy === 'checkout' ? <Loader2Icon className="animate-spin" /> : <FolderGit2Icon />} Check out

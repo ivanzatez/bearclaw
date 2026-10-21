@@ -20,12 +20,15 @@ import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useBearclaw } from '@/hooks/useBearclaw'
 import { useNow } from '@/hooks/useNow'
 import { usePrs } from '@/hooks/usePrs'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { relTime } from '@/lib/format'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { groupPrs, isOthersDraft, parsePrLocation, prHref, prRef, reviewLabel, ROT_TONE, waitingSince, type PrGroup } from '@/lib/prs'
+import { reviewSessions } from '@/lib/prReview'
+import { allSessions } from '@/lib/sessions'
 import { cn } from '@/lib/utils'
 
 /**
@@ -38,6 +41,14 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
   const pane = layout === 'pane'
   const [location, navigate] = useLocation()
   const { hosts, host, setHost, data, error, loading, refresh, refreshing, reload, links } = usePrs()
+  const { bearclaw } = useBearclaw()
+  const live = allSessions(bearclaw)
+  // Sessions on a PR: those in its worktree, and its review sessions (started from the card).
+  const prSessions = (p: PullRequest) => {
+    const out = [...(links.byPr.get(p.url) ?? [])]
+    for (const s of reviewSessions(p, live)) if (!out.some((o) => o.host === s.host && o.session_id === s.session_id)) out.push(s)
+    return out
+  }
   // `#/prs/<owner>/<repo>/<n>`: that PR's dialog is open (session PR chips link here).
   const sel = parsePrLocation(location)
   const setOpen = (p: PullRequest) => navigate(prHref(p))
@@ -163,7 +174,7 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
       key={prRef(current)}
       pr={current}
       host={host}
-      sessions={links.byPr.get(current.url) ?? []}
+      sessions={prSessions(current)}
       onClose={() => navigate('/prs', { replace: true })}
       onChanged={reload}
     />
@@ -200,7 +211,7 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
             : groups
                 // Mostly empty: a column only while something is in it.
                 .filter((g) => g.id !== 'unseenMentions' || g.prs.length)
-                .map((g) => <Column key={g.id} group={g} now={now} onOpen={setOpen} sessionsOf={(p) => links.byPr.get(p.url)} />)}
+                .map((g) => <Column key={g.id} group={g} now={now} onOpen={setOpen} sessionsOf={prSessions} />)}
         </div>
         {dialog}
       </section>
@@ -210,10 +221,8 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
   return (
     <div ref={screenRef} className="flex min-h-app flex-col bg-background">
       <ScreenHeader>
-        <div className="-ml-2 flex min-h-8 items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="Back" onClick={back} className="-my-1.5 size-11 shrink-0 rounded-xl">
-            <ChevronLeftIcon className="size-6" />
-          </Button>
+        {/* A tab on the phone (the tab row above): no back button. */}
+        <div className="flex min-h-8 items-center gap-1">
           <h1 className="flex-1 text-xl font-bold tracking-tight">Pull requests</h1>
           {refreshButton}
         </div>
@@ -235,7 +244,7 @@ export function PrsScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' })
               <ColumnTitle group={g} />
               <div className="space-y-2">
                 {g.prs.map((p) => (
-                  <PrCard key={p.url} pr={p} now={now} onOpen={setOpen} sessions={links.byPr.get(p.url)} />
+                  <PrCard key={p.url} pr={p} now={now} onOpen={setOpen} sessions={prSessions(p)} />
                 ))}
               </div>
             </section>

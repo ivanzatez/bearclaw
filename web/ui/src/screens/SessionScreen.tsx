@@ -94,6 +94,9 @@ export interface SessionScreenProps {
   onClose?: () => void
   /** Pane only: the pane is too narrow for a details column — lay it over the chat instead. */
   detailsOverlay?: boolean
+  /** Screen only: drawn above the session's header, which then has no back button or safe-area
+   *  padding of its own (the Claw tab: its tab row and character card). */
+  chrome?: React.ReactNode
 }
 
 /**
@@ -111,6 +114,7 @@ export function SessionScreen({
   autoFocusComposer = false,
   onClose,
   detailsOverlay = false,
+  chrome,
 }: SessionScreenProps) {
   const pane = layout === 'pane'
   const { bearclaw, refresh: refreshBearclaw, applyBearclaw } = useBearclaw()
@@ -410,7 +414,7 @@ export function SessionScreen({
   }
   // Mobile: swipe right anywhere on the screen = Back (the installed PWA has no native back swipe).
   const screenRef = useRef<HTMLDivElement>(null)
-  useSwipeBack(screenRef, back, !pane && !menuOpen && !continueWith)
+  useSwipeBack(screenRef, back, !pane && !chrome && !menuOpen && !continueWith)
 
   const loadOlder = () => {
     const next = nextChatLimit(chatLimit)
@@ -485,7 +489,7 @@ export function SessionScreen({
     <>
       <header
         data-tauri-drag-region={pane ? 'deep' : undefined}
-        className="z-20 shrink-0 border-b bg-background/90 pt-safe px-safe backdrop-blur-md backdrop-saturate-150"
+        className={cn('z-20 shrink-0 border-b bg-background/90 px-safe backdrop-blur-md backdrop-saturate-150', !chrome && 'pt-safe')}
       >
         <div
           className={
@@ -494,7 +498,7 @@ export function SessionScreen({
               : 'mx-auto flex w-full max-w-3xl items-center gap-1 py-1.5 pr-2 pl-1'
           }
         >
-          {pane ? null : (
+          {pane || chrome ? null : (
             <Button variant="ghost" size="icon" aria-label="Back" onClick={back} className="size-11 shrink-0 rounded-xl">
               <ChevronLeftIcon className="size-6" />
             </Button>
@@ -686,6 +690,7 @@ export function SessionScreen({
 
   return (
     <div ref={screenRef} className="fixed-app flex flex-col overflow-hidden bg-background" {...drop.bind}>
+      {chrome}
       {column}
       <DetailsDrawer {...menuProps} />
       {continueForm}

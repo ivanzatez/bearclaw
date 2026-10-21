@@ -53,6 +53,32 @@ export function briefsDir(env = process.env, home = os.homedir()) {
   return path.join(bearclawStateDir(env, home), 'briefs');
 }
 
+/** What a review session is told after the PR's line (crates/bearclaw/src/core/prs.rs DEFAULT_REVIEW_PROMPT). */
+export const DEFAULT_REVIEW_PROMPT = 'Review this pull request: load the p-dev:review skill and follow it. Post nothing on GitHub until I approve the draft.';
+
+/** A configured directory (`~` expanded, absolute), or null when unset or not absolute. */
+function configuredDir(v, home) {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  const p = expandHome(v.trim(), home);
+  return path.isAbsolute(p) ? path.normalize(p) : null;
+}
+
+/** The brain folder, as `bearclaw brain path` finds it: `brain.root`, `brain_root:` in ~/.brainrc, ~/brain. */
+export function brainRoot(raw, home = os.homedir(), fsImpl = fs) {
+  const configured = configuredDir(raw?.brain?.root, home);
+  if (configured) return configured;
+  try {
+    const rc = fsImpl.readFileSync(path.join(home, '.brainrc'), 'utf8');
+    const line = rc.split('\n').find((l) => l.trim().startsWith('brain_root:'));
+    const v = line?.trim().slice('brain_root:'.length).trim().replace(/^["']|["']$/g, '');
+    const p = configuredDir(v, home);
+    if (p) return p;
+  } catch {
+    /* no ~/.brainrc */
+  }
+  return path.join(home, 'brain');
+}
+
 /** bearclaw's per-machine state: `${XDG_STATE_HOME:-~/.local/state}/bearclaw`. */
 export function bearclawStateDir(env = process.env, home = os.homedir()) {
   const base = env.XDG_STATE_HOME ? expandHome(env.XDG_STATE_HOME, home) : path.join(home, '.local', 'state');
@@ -210,7 +236,8 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
- *     restore: { onBoot, markerFile }, push: { dir }, configFile, configFound }
+ *     restore: { onBoot, markerFile }, push: { dir }, claw: { dir },
+ *     books: { brain, notepad } (notes explorer configs), configFile, configFound }
  */
 export function normalizeConfig(
   raw = {},
@@ -492,6 +519,16 @@ export function normalizeConfig(
 
   // Push notifications (lib/push.mjs): the VAPID keys and the subscribed devices.
   const push = { dir: path.join(bearclawStateDir(env, home), 'push') };
+  // The dashboard's Brain and Notepad tabs (lib/notes.mjs, writable): `brain.root` (else
+  // `brain_root:` in ~/.brainrc, else ~/brain) and `notes.root` (else ~/notes), as the CLI reads them.
+  const books = {
+    brain: { root: brainRoot(raw, home, fsImpl), name: 'Brain', searchCmd: null, exclude: [], writable: true },
+    notepad: { root: configuredDir(raw.notes?.root, home) ?? path.join(home, 'notes'), name: 'Notepad', searchCmd: null, exclude: [], writable: true },
+  };
+  // PR reviews started from a card (the dashboard's Shift+R): `prs.reviewPrompt`, as the CLI reads it.
+  const reviewPrompt = typeof raw.prs?.reviewPrompt === 'string' && raw.prs.reviewPrompt.trim() ? raw.prs.reviewPrompt.trim() : DEFAULT_REVIEW_PROMPT;
+  // Claw (the dashboard's operator session): its workspace, where its session runs (`bearclaw claw path`).
+  const claw = { dir: env.BEARCLAW_CLAW_DIR ? path.resolve(expandHome(env.BEARCLAW_CLAW_DIR, home)) : path.join(bearclawStateDir(env, home), 'claw') };
 
   return {
     self: self.trim(),
@@ -527,6 +564,9 @@ export function normalizeConfig(
     restore,
     operator,
     push,
+    claw,
+    books,
+    reviewPrompt,
   };
 }
 

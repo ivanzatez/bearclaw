@@ -89,6 +89,10 @@ src/
                       recently closed: hostDormant() / hasEntries() / closedCount() / closedMeta()
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
+  lib/tabs.ts         the phone's tab row (TABS, activeTab()), drawn by components/TabBar.tsx in every ScreenHeader
+  lib/claw.ts         the Claw tab's character card numbers (clawStats()); screens/ClawScreen.tsx = card + Claw's chat
+  lib/todo.ts, lib/tasks.ts  the Todo / Tasks tabs' grouping (screens/TodoScreen.tsx, screens/TasksScreen.tsx)
+  lib/prReview.ts     a review session from a PR card (reviewName(), reviewPromptFor(), reviewSessions())
   lib/push.ts         push notifications: pushSupport() (HTTPS, Home Screen on iOS), keyBytes(), openRoute(),
                       installServiceWorker() (public/sw.js: push + notification taps only), currentSubscription()
   hooks/usePush.ts    usePush(): Settings → Notifications (subscribe, preferences, test); usePushPresence():

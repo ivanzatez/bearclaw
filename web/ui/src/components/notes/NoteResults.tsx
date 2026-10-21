@@ -3,6 +3,7 @@ import { CircleAlertIcon, FileTextIcon, Loader2Icon } from 'lucide-react'
 
 import type { NoteEntry, NoteHit, NotesSearch } from '@/api/types'
 import { relTime } from '@/lib/format'
+import { useNotesBook } from '@/hooks/useNotes'
 import { notesHref, splitRanges } from '@/lib/notes'
 import { dirname } from '@/lib/paths'
 import { cn } from '@/lib/utils'
@@ -34,6 +35,7 @@ export interface NoteResultsProps {
 
 /** Search results: title, folder, age, up to three snippets with the matches marked. */
 export function NoteResults({ host, data, loading, error, selected, onPick, compact = false }: NoteResultsProps) {
+  const book = useNotesBook()
   if (error) {
     return (
       <p className="flex items-center gap-2 px-4 py-6 text-sm text-destructive">
@@ -62,7 +64,7 @@ export function NoteResults({ host, data, loading, error, selected, onPick, comp
           return (
             <li key={r.path}>
               <a
-                href={`#${notesHref(host, r.path)}`}
+                href={`#${notesHref(host, r.path, book)}`}
                 onClick={() => onPick(r)}
                 className={cn(
                   'block rounded-lg px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
@@ -95,6 +97,7 @@ export function NoteResults({ host, data, loading, error, selected, onPick, comp
 
 /** The landing list: recently changed notes. */
 export function RecentNotes({ host, notes, selected, compact = false }: { host: string; notes: NoteEntry[]; selected: string | null; compact?: boolean }) {
+  const book = useNotesBook()
   if (!notes.length) return null
   return (
     <section aria-label="Recently changed">
@@ -103,7 +106,7 @@ export function RecentNotes({ host, notes, selected, compact = false }: { host: 
         {notes.map((n) => (
           <li key={n.path}>
             <a
-              href={`#${notesHref(host, n.path)}`}
+              href={`#${notesHref(host, n.path, book)}`}
               className={cn(
                 'flex min-w-0 items-center gap-2 rounded-lg px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 compact ? 'py-1.5 text-[0.8125rem]' : 'min-h-11 py-2 text-[0.9375rem]',
