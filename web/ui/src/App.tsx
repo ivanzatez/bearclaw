@@ -33,7 +33,7 @@ import { UsageScreen } from '@/screens/UsageScreen'
 
 /**
  * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
- * plus the terminal dashboard's tabs on the phone: `#/claw` (Claw), `#/todo`, `#/tasks`, `#/brain[/…]`, `#/notepad[/…]`,
+ * plus the terminal dashboard's tabs on the phone: `#/claw` (Claw), `#/todo`, `#/tasks`, `#/memory[/…]` (the brain), `#/notepad[/…]`,
  * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the bearclaw by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
@@ -74,7 +74,7 @@ export default function App() {
                   <Route path="/tasks">
                     <TasksScreen />
                   </Route>
-                  <Route path={/^\/brain(?:\/.*)?$/}>
+                  <Route path={/^\/memory(?:\/.*)?$/}>
                     <NotesBookContext.Provider value="brain">
                       <NotesScreen />
                     </NotesBookContext.Provider>

@@ -44,8 +44,8 @@ export interface NotesScreenProps {
 /**
  * `#/notes[/<host>[/<path>]]`: browse (folder tree), search (debounced, snippets with the
  * matches marked) and read the markdown notes of any host that has `web.notes.root`. Under
- * NotesBookContext `brain` / `notepad` (`#/brain…`, `#/notepad…`): the dashboard's Brain and
- * Notepad tabs, whose notes can be edited and added.
+ * NotesBookContext `brain` / `notepad` (`#/memory…`, `#/notepad…`): the dashboard's Brain (the
+ * phone's Memory tab) and Notepad, whose notes can be edited and added.
  */
 export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) {
   const pane = layout === 'pane'
@@ -196,7 +196,7 @@ export function NotesScreen({ layout = 'screen', searchRef }: NotesScreenProps) 
   )
 
   const notice = !hosts.length && book !== 'notes' ? (
-    <Empty title={`No ${book === 'brain' ? 'Brain' : 'Notepad'} here`}>This server predates the {book} tab: update bearclaw and restart its web server.</Empty>
+    <Empty title={`No ${book === 'brain' ? 'Memory' : 'Notepad'} here`}>This server predates this tab: update bearclaw and restart its web server.</Empty>
   ) : !hosts.length ? (
     <Empty title="No notes configured">
       Point a host at a folder of markdown notes: <code className="font-mono">bearclaw config set web.notes.root ~/notes</code>, then restart its web server.

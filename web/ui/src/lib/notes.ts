@@ -54,14 +54,18 @@ export function ancestorDirs(path: string): string[] {
 const encPath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
 
 /** `#/notes`, `#/notes/<host>`, `#/notes/<host>/<path…>` (segments encoded). */
+/** Where each notebook lives in the app: the brain is the phone's Memory tab. */
+const BOOK_ROUTE: Record<NotesBook, string> = { notes: 'notes', brain: 'memory', notepad: 'notepad' }
+
 export function notesHref(host?: string | null, path?: string | null, book: NotesBook = 'notes'): string {
-  if (!host) return `/${book}`
-  return path ? `/${book}/${encodeURIComponent(host)}/${encPath(path)}` : `/${book}/${encodeURIComponent(host)}`
+  const base = `/${BOOK_ROUTE[book]}`
+  if (!host) return base
+  return path ? `${base}/${encodeURIComponent(host)}/${encPath(path)}` : `${base}/${encodeURIComponent(host)}`
 }
 
-/** A hash location → the explorer's host + note path, or null when it is not that notebook's route (`/notes`, `/brain`, `/notepad`). */
+/** A hash location → the explorer's host + note path, or null when it is not that notebook's route (`/notes`, `/memory`, `/notepad`). */
 export function parseNotesLocation(location: string, book: NotesBook = 'notes'): { host: string | null; path: string | null } | null {
-  const m = new RegExp(`^/${book}(?:/([^/]*)(?:/(.*))?)?/?$`).exec(location)
+  const m = new RegExp(`^/${BOOK_ROUTE[book]}(?:/([^/]*)(?:/(.*))?)?/?$`).exec(location)
   if (!m) return null
   let host: string | null = null
   try {

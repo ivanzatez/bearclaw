@@ -1,6 +1,7 @@
-// The phone's tab row, in the terminal dashboard's order (components/TabBar.tsx).
+// The phone's tab row, in the terminal dashboard's order (components/TabBar.tsx). Usage is on the
+// Claw tab's card instead (and #/usage stays reachable); the brain is called Memory here.
 
-export type TabId = 'sessions' | 'claw' | 'prs' | 'tasks' | 'todo' | 'usage' | 'brain' | 'notepad' | 'settings'
+export type TabId = 'sessions' | 'claw' | 'prs' | 'tasks' | 'todo' | 'memory' | 'notepad' | 'settings'
 
 export const TABS: readonly { id: TabId; label: string; route: string }[] = [
   { id: 'sessions', label: 'Sessions', route: '/' },
@@ -8,13 +9,12 @@ export const TABS: readonly { id: TabId; label: string; route: string }[] = [
   { id: 'prs', label: 'PRs', route: '/prs' },
   { id: 'tasks', label: 'Tasks', route: '/tasks' },
   { id: 'todo', label: 'Todo', route: '/todo' },
-  { id: 'usage', label: 'Usage', route: '/usage' },
-  { id: 'brain', label: 'Brain', route: '/brain' },
+  { id: 'memory', label: 'Memory', route: '/memory' },
   { id: 'notepad', label: 'Notepad', route: '/notepad' },
   { id: 'settings', label: 'Settings', route: '/settings' },
 ]
 
-/** The tab a hash route belongs to (`/brain/x.md` → brain), or null off the tab row (a session, jobs). */
+/** The tab a hash route belongs to (`/memory/x.md` → memory), or null off the tab row (a session, jobs). */
 export function activeTab(route: string): TabId | null {
   if (route === '/' || route === '') return 'sessions'
   const first = route.split('/')[1]

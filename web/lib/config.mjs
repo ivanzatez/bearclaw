@@ -522,7 +522,8 @@ export function normalizeConfig(
   // The dashboard's Brain and Notepad tabs (lib/notes.mjs, writable): `brain.root` (else
   // `brain_root:` in ~/.brainrc, else ~/brain) and `notes.root` (else ~/notes), as the CLI reads them.
   const books = {
-    brain: { root: brainRoot(raw, home, fsImpl), name: 'Brain', searchCmd: null, exclude: [], writable: true },
+    // The phone calls the brain Memory (its tab and title).
+    brain: { root: brainRoot(raw, home, fsImpl), name: 'Memory', searchCmd: null, exclude: [], writable: true },
     notepad: { root: configuredDir(raw.notes?.root, home) ?? path.join(home, 'notes'), name: 'Notepad', searchCmd: null, exclude: [], writable: true },
   };
   // PR reviews started from a card (the dashboard's Shift+R): `prs.reviewPrompt`, as the CLI reads it.

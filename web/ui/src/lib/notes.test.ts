@@ -51,6 +51,14 @@ describe('routes', () => {
     expect(parseNotesLocation('/notesx')).toBeNull()
     expect(parseNotesLocation('/s/ws/id')).toBeNull()
   })
+
+  it('the brain is the Memory tab, the notepad its own', () => {
+    expect(notesHref('ws', 'x.md', 'brain')).toBe('/memory/ws/x.md')
+    expect(notesHref(null, null, 'notepad')).toBe('/notepad')
+    expect(parseNotesLocation('/memory/ws/x.md', 'brain')).toEqual({ host: 'ws', path: 'x.md' })
+    expect(parseNotesLocation('/brain/ws/x.md', 'brain')).toBeNull()
+    expect(parseNotesLocation('/notes/ws', 'notepad')).toBeNull()
+  })
 })
 
 describe('resolveNoteLink', () => {

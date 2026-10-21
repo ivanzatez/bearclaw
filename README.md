@@ -102,7 +102,8 @@ If linking fails with "You have not agreed to the Xcode license agreements", run
 For the phone: `bearclaw web build`, then `bearclaw web serve` on each machine, and open
 `http://<tailscale-ip>:7777`. It looks like the dashboard (the Claw theme: monospace, the same
 colours) and has its tabs along the top: Sessions, Claw (chat with it, under the druid's card),
-PRs (with Review on a card), Tasks, Todo, Usage, Brain and Notepad (both editable), Settings. Over HTTPS (`tailscale serve`) and added to the Home Screen, it
+PRs (with Review on a card), Tasks, Todo, Memory (the brain) and Notepad (both editable),
+Settings. Usage is on the Claw card. Over HTTPS (`tailscale serve`) and added to the Home Screen, it
 also sends notifications when a session waits on you or finishes. Setting up an always-on workstation from scratch:
 [docs/setup.md](docs/setup.md).
 

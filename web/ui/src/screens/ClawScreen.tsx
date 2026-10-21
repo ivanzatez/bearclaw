@@ -143,7 +143,7 @@ function clawLines(s: ClawStats): [string, string][] {
     ['Waiting on you', waiting],
     ['Todo', s.todo == null ? '—' : `${s.todo} in progress`],
     ['Usage', s.usage ?? '—'],
-    ['Brain', s.brain == null ? '—' : plural(s.brain, 'note', 'notes')],
+    ['Memory', s.brain == null ? '—' : plural(s.brain, 'note', 'notes')],
   ]
 }
 

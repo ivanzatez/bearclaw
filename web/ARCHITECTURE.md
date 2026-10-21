@@ -484,7 +484,7 @@ Session stacks) and the server only shells out to `bearclaw --local stack … --
 
 ## UI (`ui/`, React)
 
-On the phone every top-level screen starts with the terminal dashboard's tab row: Sessions `#/`, Claw `#/claw` (Claw's chat under its character card), PRs `#/prs`, Tasks `#/tasks`, Todo `#/todo`, Usage `#/usage`, Brain `#/brain[/…]`, Notepad `#/notepad[/…]`, Settings `#/settings`. The default palette is Claw, the dashboard's look (monospace, its colours).
+On the phone every top-level screen starts with the terminal dashboard's tab row: Sessions `#/`, Claw `#/claw` (Claw's chat under its character card), PRs `#/prs`, Tasks `#/tasks`, Todo `#/todo`, Memory `#/memory[/…]` (the brain), Notepad `#/notepad[/…]`, Settings `#/settings`. Usage (`#/usage`) is not a tab there: the Claw card shows it. The default palette is Claw, the dashboard's look (monospace, its colours).
 
 The list and session detail (Chat | Term, composer with quick replies, key chips and autocomplete — `/skill` at the start or mid-sentence in Claude sessions, `@file` for the cwd's `.md` / `.plain` files, `brain:note`; ↑↓, Tab/Enter, Esc), plus a host filter, the notes explorer (`#/notes`), a Settings screen (`#/settings`: text
 size for the whole UI, theme (colour palette: Default / Earth / Dusk, `bearclaw.palette`), light/dark mode, terminal text,
