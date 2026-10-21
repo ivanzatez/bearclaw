@@ -89,6 +89,10 @@ src/
                       recently closed: hostDormant() / hasEntries() / closedCount() / closedMeta()
   lib/viewport.ts     --app-h / --app-top from visualViewport (utilities h-app / min-h-app / fixed-app)
   lib/utils.ts        cn() (shadcn)
+  lib/push.ts         push notifications: pushSupport() (HTTPS, Home Screen on iOS), keyBytes(), openRoute(),
+                      installServiceWorker() (public/sw.js: push + notification taps only), currentSubscription()
+  hooks/usePush.ts    usePush(): Settings → Notifications (subscribe, preferences, test); usePushPresence():
+                      tells the server while the app is on screen
   hooks/usePoller.ts  setTimeout-chained poller: no overlap, pauses while hidden, abort on unmount,
                       refresh() (runs even while hidden)
   hooks/useFollowScroll.ts  follow-the-tail scrolling for chat / term

@@ -86,7 +86,8 @@ Every machine runs the same `server.mjs`. It:
 - exposes **its own** sessions, discovered with `bearclaw list --json` (cached ~2 s);
 - drives its own backends directly for peek/send/keys (it needs untruncated, header-free output);
 - reads chat transcripts from `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`;
-- for the whole-bearclaw view, fetches each peer's local list over HTTP and merges.
+- for the whole-bearclaw view, fetches each peer's local list over HTTP and merges;
+- sends push notifications to the devices that subscribed when a session waits or finishes.
 
 Requests for another host are proxied once to that peer with `?local=1`, and requests carrying
 `?local=1` are never proxied again, so there are no loops. Either machine's URL shows everything.
@@ -410,6 +411,9 @@ JSON over HTTP, errors as `{ "error": "..." }`. At a high level:
 | GET / PUT / DELETE | `/api/memos/:id` | one memo (`+ transcript, path`); PUT `{ title }` renames (the body is kept); DELETE removes the file and its audio |
 | POST | `/api/memos/:id/retry` | transcribe the segments that failed and rewrite the memo |
 | POST | `/api/speak` | `{ text }` (markdown is fine: code, tables, URLs and ids are dropped, at most ~4000 chars) → `audio/mpeg` via OpenAI `gpt-4o-mini-tts`; always this server. Key: `$OPENAI_TEXT_TO_SPEECH_API_KEY` (env, else Keychain), else the transcription key (which needs the audio scope). 400 nothing to say, 501 without a key, 502 upstream errors, 429 rate limit |
+| GET | `/api/push?endpoint=<url>` | [push notifications](#push-notifications), always this server: that device's `{ subscribed, events: { waiting, done }, awayOnly, lastSentAt, lastError }` (`{ subscribed: false }` for an unknown endpoint). `/api/settings` carries `push: { enabled, publicKey }` (the VAPID key) |
+| POST | `/api/push/subscribe` | `{ subscription, events?, awayOnly? }` (`subscription` = the browser's `PushSubscription.toJSON()`; its endpoint must be an https URL of a known push service: Apple, Google, Mozilla, Microsoft) → the device as above. Again with the same endpoint updates its preferences. 400 bad subscription or preferences |
+| POST | `/api/push/unsubscribe` · `/api/push/presence` · `/api/push/test` | `{ endpoint }` → forget the device · `{ endpoint, visible }`: the app is on screen there (nothing is sent to it for 45 s after a `visible: true`) · send it a test notification now (404 not subscribed, 502 with the push service's refusal) |
 | GET/POST | `/api/operator` | the [voice operator](#voice-operator): `{ host, dir, session }` (`session`: its `bearclaw list` row, null when not running); POST finds it or starts it → `+ { started, tmuxSession }` (409 when a tmux session `operator` exists without it). Served by the first host of `web.operator.hosts` that answers (proxied with `?local=1`; an unreachable peer, or one without an operator, passes to the next); 503 when none does |
 | POST | `/api/hosts/:host/autoname` | `{}` → run the naming pass on that host now → `{ renamed: [{ from, to }], tmux, held, errors }` |
 | POST | `/api/hosts/:host/sessions/:id/files/stat` | `{ paths }` (≤ 200, as written in chat, `:line` allowed) → per path: resolved absolute path, `exists`, `isFile`, size, mtime, `kind` (markdown/text/image/pdf/other); the UI links only existing files |
@@ -463,6 +467,28 @@ for every device: each server sends `/api/operator` to the first host of the lis
 gets `/clear`. Claude Code then starts a new session (a new session id, an empty transcript), so
 the next conversation starts fresh and the app shows no history. A cleared session has no context
 until it is used, which keeps it from being cleared again.
+
+## Push notifications
+
+A phone (or any browser) can get a notification when a session starts waiting on the user
+(status → `waiting`: a question or a permission prompt) or finishes its turn (`busy` → `idle`).
+Settings → Notifications subscribes the device: `ui/public/sw.js` is the service worker (push
+only, no fetch handler), `pushManager.subscribe` runs with the server's VAPID key, and the
+subscription goes to `POST /api/push/subscribe`. iOS offers push only to the app added to the
+Home Screen and opened from there, over HTTPS (`tailscale serve`).
+
+`web/lib/push.mjs` keeps the VAPID key pair and the devices in `<state>/bearclaw/push/`
+(`vapid.json`, `subscriptions.json`, both `0600`). While at least one device is subscribed it
+polls the merged bearclaw every 5 s (the warm snapshot while someone is watching, else a fresh
+build), compares each session's status with the last poll (a session seen for the first time is
+only remembered) and sends Web Push itself: the payload is encrypted per RFC 8291 (aes128gcm)
+and signed with a VAPID JWT (RFC 8292), both with `node:crypto`, no dependency. The payload is
+`{ title, body, tag, url }`: the session's title, the question or the first line of its last
+reply, the session as the tag (a newer notification replaces the older one), and its route, which
+a tap opens. A device is skipped while its app is on screen (presence pings every 30 s) and,
+with `awayOnly` (the default), while this machine has had keyboard or mouse input in the last
+2 minutes (`ioreg` `HIDIdleTime`; unknown counts as away). The same event for the same session
+is sent at most every 30 s. A 404/410 from the push service drops the device.
 
 ## Voice memos
 

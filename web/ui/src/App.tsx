@@ -13,6 +13,7 @@ import { PrsProvider } from '@/providers/PrsProvider'
 import { SettingsProvider } from '@/providers/SettingsProvider'
 import { SpeechProvider } from '@/providers/SpeechProvider'
 import { usePreventFileNavigation } from '@/hooks/useAttach'
+import { usePushPresence } from '@/hooks/usePush'
 import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { ThemeProvider } from '@/providers/ThemeProvider'
 import { DesktopShell } from '@/screens/DesktopShell'
@@ -42,6 +43,7 @@ export default function App() {
     <ThemeProvider>
       <PrefsProvider>
       <SettingsProvider>
+        <PushPresence />
       <SpeechProvider>
         <BearclawProvider>
         <DormantProvider>
@@ -101,4 +103,10 @@ export default function App() {
       </PrefsProvider>
     </ThemeProvider>
   )
+}
+
+/** Tells the server while the app is on screen, so this device is not notified about it (hooks/usePush.ts). */
+function PushPresence() {
+  usePushPresence()
+  return null
 }

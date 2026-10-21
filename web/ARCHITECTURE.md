@@ -49,6 +49,7 @@ lib/dormant.mjs       dormant + recently closed sessions (session recovery): `be
 lib/stacks.mjs        session stacks: `bearclaw stack` errors → HTTP, sibling spawn dir rule, post-spawn `stack add`, background `stack sync`
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
+lib/push.mjs          push notifications: VAPID keys, devices, RFC 8291 encryption, the waiting/done watcher (docs/architecture.md → Push notifications)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
 lib/app.mjs           node:http server: /api/* → api, everything else → static UI dir

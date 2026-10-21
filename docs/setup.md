@@ -238,6 +238,10 @@ changes), builds the CLI into `~/.local/bin/bearclaw`, runs `bearclaw web build`
 2. Open `http://100.x.y.z:7777` (the workstation — it is always on) in Safari, then Share → **Add
    to Home Screen**. It runs full-screen as a PWA: session list, chat and terminal view, a
    composer with quick replies, and "new session".
+   - For **notifications** (a session waits on you, or finishes), the address has to be HTTPS:
+     `tailscale serve --bg --https=443 http://127.0.0.1:7777` on the server machine, then open
+     `https://<machine>.<tailnet>.ts.net` instead. In the app from the Home Screen: Settings →
+     Notifications → on, allow, and **Test**.
 3. For a real terminal, use an ssh client such as **Termius**: generate a key in the app, append
    its public key to `~/.ssh/authorized_keys` on the workstation, host = `100.x.y.z`, enable Mosh
    if installed. Then `bearclaw last` / `bearclaw new main` for work and `bearclaw watch` for the dashboard.

@@ -26,6 +26,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           speak: data?.speak?.enabled === true,
           operator: data?.operator?.enabled === true,
           memos: data?.memos?.enabled === true,
+          pushKey: data?.push?.enabled === true && typeof data.push.publicKey === 'string' ? data.push.publicKey : null,
           loaded: true,
         })
       })

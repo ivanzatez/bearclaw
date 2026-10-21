@@ -580,3 +580,39 @@ test('answer types the keys for the pending question, only when it is safe to', 
   answered = { answers: ['later'] };
   assert.equal(await call({ toolUseId: 'tq1', answers: [{ options: [0] }] }), 409, 'already answered');
 });
+
+test('/api/push routes reach the push module; settings carry its public key; 501 without one', async () => {
+  const host = fakeHost('solo', []);
+  const config = normalizeConfig({ self: 'solo' }, { env: {}, home: '/home/tester' });
+  const calls = [];
+  const push = {
+    publicKey: async () => 'BPUBKEY',
+    device: async (endpoint) => (calls.push(['device', endpoint]), { subscribed: false }),
+    subscribe: async (body) => (calls.push(['subscribe', body]), { subscribed: true }),
+    unsubscribe: async (endpoint) => (calls.push(['unsubscribe', endpoint]), { subscribed: false }),
+    presence: (endpoint, visible) => (calls.push(['presence', endpoint, visible]), { ok: true }),
+    test: async (endpoint) => (calls.push(['test', endpoint]), { ok: true }),
+    status: () => ({ devices: 1, watching: true, lastEvent: null }),
+  };
+  const api = createApi({ config, ...host, push, warmBearclaw: false });
+  const server = createHttpServer({ handleApi: api, uiDir: null });
+  const base = await listen(server);
+  try {
+    assert.deepEqual((await get(`${base}/api/settings`)).body.push, { enabled: true, publicKey: 'BPUBKEY' });
+    assert.equal((await get(`${base}/api/health`)).body.push.devices, 1);
+    assert.equal((await get(`${base}/api/push?endpoint=${encodeURIComponent('https://web.push.apple.com/x')}`)).status, 200);
+    assert.equal((await post(`${base}/api/push/subscribe`, { subscription: { endpoint: 'e' } })).body.subscribed, true);
+    assert.equal((await post(`${base}/api/push/presence`, { endpoint: 'e', visible: true })).status, 200);
+    assert.equal((await post(`${base}/api/push/test`, { endpoint: 'e' })).status, 200);
+    assert.equal((await post(`${base}/api/push/unsubscribe`, { endpoint: 'e' })).status, 200);
+    assert.equal((await post(`${base}/api/push/test`, {})).status, 400);
+    assert.equal((await post(`${base}/api/push/nope`, {})).status, 404);
+    assert.deepEqual(calls.map((c) => c[0]), ['device', 'subscribe', 'presence', 'test', 'unsubscribe']);
+    assert.deepEqual(calls[2], ['presence', 'e', true]);
+  } finally {
+    server.close();
+  }
+  const bare = createApi({ config, ...host, warmBearclaw: false });
+  assert.deepEqual((await bare({ method: 'GET', headers: {} }, new URL('http://x/api/settings'))).body.push, { enabled: false });
+  await assert.rejects(bare({ method: 'GET', headers: {} }, new URL('http://x/api/push')), /not available/);
+});

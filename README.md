@@ -100,7 +100,8 @@ If linking fails with "You have not agreed to the Xcode license agreements", run
 `DEVELOPER_DIR=/Library/Developer/CommandLineTools cargo install --path crates/bearclaw`.
 
 For the phone: `bearclaw web build`, then `bearclaw web serve` on each machine, and open
-`http://<tailscale-ip>:7777`. Setting up an always-on workstation from scratch:
+`http://<tailscale-ip>:7777`. Over HTTPS (`tailscale serve`) and added to the Home Screen, it
+also sends notifications when a session waits on you or finishes. Setting up an always-on workstation from scratch:
 [docs/setup.md](docs/setup.md).
 
 ## Commands
