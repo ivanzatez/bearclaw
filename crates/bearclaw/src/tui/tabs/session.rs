@@ -78,7 +78,7 @@ impl SessionDetail {
     }
 
     fn find<'a>(&self, rows: &'a [Session]) -> Option<&'a Session> {
-        rows.iter().find(|r| r.key() == self.key)
+        rows.iter().find(|r| r.row_key() == self.key)
     }
 
     fn load_brief(&mut self, s: &Session) {
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn detail_pins_its_session_and_sends_through_input() {
         let rows = rows();
-        let key = rows[0].key();
+        let key = rows[0].row_key();
         let mut d = SessionDetail::open_with(key, no_peek, record_send, no_focus);
         settle(&mut d, &rows, |d, _| !d_peek_loading(d));
         let s = screen(&mut d, &rows);

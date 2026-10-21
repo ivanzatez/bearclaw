@@ -950,13 +950,9 @@ fn run_tui(o: WatchOpts) -> Result<()> {
         // The registry knows nothing about titles, and `rows` came from it.
         apply_titles(&mut rows, &naming.titles);
         if selected.is_none() && !rows.is_empty() {
-            selected = Some(rows[0].key());
+            selected = Some(rows[0].row_key());
         }
-        // The selected session can vanish between polls; fall back to the top.
-        let sel = selected
-            .as_ref()
-            .and_then(|k| rows.iter().position(|r| &r.key() == k))
-            .unwrap_or(0);
+        let sel = selected_row(&rows, selected.as_deref());
         // ListState::offset survives a shrinking list and can point past the end.
         clamp_offset(&mut dash, rows.len());
 
@@ -1245,7 +1241,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                         .find(|r| r.session_id.as_deref() == Some(id.as_str()))
                     {
                         Some(r) => {
-                            selected = Some(r.key());
+                            selected = Some(r.row_key());
                             let r = r.clone();
                             open_session(&r, &mut dash, &mut log);
                         }
@@ -1331,7 +1327,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             }
             Action::Detail => {
                 if let Some(r) = rows.get(sel) {
-                    dash.detail = Some(SessionDetail::open(r.key()));
+                    dash.detail = Some(SessionDetail::open(r.row_key()));
                 }
             }
             Action::ToggleEvents => dash.events = Some(!dash.events_shown),
@@ -1351,10 +1347,10 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                 }
             }
             Action::Up if !rows.is_empty() => {
-                selected = Some(rows[sel.saturating_sub(1)].key());
+                selected = Some(rows[sel.saturating_sub(1)].row_key());
             }
             Action::Down if !rows.is_empty() => {
-                selected = Some(rows[(sel + 1).min(rows.len() - 1)].key());
+                selected = Some(rows[(sel + 1).min(rows.len() - 1)].row_key());
             }
             Action::Up | Action::Down => {}
             Action::Focus => {
@@ -1364,7 +1360,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             }
             // Digit and tap indices are raw — re-clamp before trusting them.
             Action::JumpTo(idx) if idx < rows.len() => {
-                selected = Some(rows[idx].key());
+                selected = Some(rows[idx].row_key());
                 let r = rows[idx].clone();
                 open_session(&r, &mut dash, &mut log);
             }
@@ -1611,6 +1607,14 @@ fn term_click(
 
 /// Enter on a session: one in tmux opens inside the dashboard; anything else (iTerm, or a
 /// tmux session that won't attach) gets its own terminal focused, as before.
+/// The cursor's row: the one `selected` (a [`Session::row_key`]) names. The selected session
+/// can vanish between polls; fall back to the top.
+fn selected_row(rows: &[Session], selected: Option<&str>) -> usize {
+    selected
+        .and_then(|k| rows.iter().position(|r| r.row_key() == k))
+        .unwrap_or(0)
+}
+
 fn open_session(r: &Session, dash: &mut Dash, log: &mut Vec<Ev>) {
     if r.backend == crate::core::discovery::Backend::Tmux
         && !is_fixture()
@@ -2387,6 +2391,21 @@ mod tests {
         assert_eq!(rows_setting(None), "auto");
         assert_eq!(rows_setting(Some(true)), "2");
         assert_eq!(rows_setting(Some(false)), "1");
+    }
+
+    #[test]
+    fn the_cursor_walks_past_a_conversation_open_in_two_terminals() {
+        // One conversation resumed in a second tmux session: two processes, one sessionId.
+        let mut rows = fixture();
+        let mut twin = rows[1].clone();
+        twin.pid = 9;
+        twin.tmux_session = Some("frontend-2".into());
+        rows.insert(2, twin);
+        for (i, r) in rows.iter().enumerate() {
+            assert_eq!(selected_row(&rows, Some(&r.row_key())), i);
+        }
+        assert_eq!(selected_row(&rows, Some("gone")), 0);
+        assert_eq!(selected_row(&rows, None), 0);
     }
 
     #[test]

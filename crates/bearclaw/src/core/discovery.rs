@@ -128,6 +128,13 @@ impl Session {
             .unwrap_or_else(|| self.pid.to_string())
     }
 
+    /// This process's row: one conversation can be open in two terminals (resumed in a
+    /// second tmux session), and those share a sessionId — the pid tells them apart. The
+    /// list cursor and the up-close view track this, so they can tell the two apart.
+    pub fn row_key(&self) -> String {
+        format!("{}@{}", self.key(), self.pid)
+    }
+
     /// True when the display name is Claude's cwd+hash fallback rather than
     /// something a human (or an LLM) chose — batch B renames exactly these.
     pub fn is_derived_name(&self) -> bool {
