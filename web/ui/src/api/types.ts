@@ -207,6 +207,59 @@ export interface Settings {
   push?: { enabled: boolean; publicKey?: string }
 }
 
+/** One spoken line of a video's narration, on its clock (seconds). */
+export interface VideoLine {
+  t0: number
+  t1: number
+  text: string
+}
+
+/** A scene of a video: where it sits on the narration's clock and what is said in it. */
+export interface VideoScene {
+  id: string
+  name: string
+  start: number
+  dur: number
+  visual: number
+  anchors: (number | null)[] | null
+  lines: VideoLine[]
+}
+
+/** An answer slide the session put on the video (its folder's slides/). */
+export interface VideoSlide {
+  name: string
+  mtime: number
+  title: string
+  points: string[]
+  code: string | null
+}
+
+/** GET /api/videos */
+export interface VideoSummary {
+  id: string
+  title: string
+  /** The session that made it and answers questions about it. */
+  session: string | null
+  host: string | null
+  duration: number
+  scenes: number
+  updatedAt: number
+}
+
+/** GET /api/videos/:id */
+export interface Video {
+  id: string
+  title: string
+  session: string | null
+  host: string | null
+  audio: string | null
+  duration: number
+  scenes: VideoScene[]
+  dir: string
+  slidesDir: string
+  slides: VideoSlide[]
+}
+
 /** GET /api/push, POST /api/push/subscribe — this device's notification preferences on the server. */
 export interface PushDevice {
   subscribed: boolean

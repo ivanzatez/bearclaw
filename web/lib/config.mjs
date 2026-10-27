@@ -236,7 +236,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
- *     restore: { onBoot, markerFile }, push: { dir }, claw: { dir },
+ *     restore: { onBoot, markerFile }, push: { dir }, claw: { dir }, videos: { dir },
  *     books: { brain, notepad } (notes explorer configs), configFile, configFound }
  */
 export function normalizeConfig(
@@ -530,6 +530,8 @@ export function normalizeConfig(
   const reviewPrompt = typeof raw.prs?.reviewPrompt === 'string' && raw.prs.reviewPrompt.trim() ? raw.prs.reviewPrompt.trim() : DEFAULT_REVIEW_PROMPT;
   // Claw (the dashboard's operator session): its workspace, where its session runs (`bearclaw claw path`).
   const claw = { dir: env.BEARCLAW_CLAW_DIR ? path.resolve(expandHome(env.BEARCLAW_CLAW_DIR, home)) : path.join(bearclawStateDir(env, home), 'claw') };
+  // Videos (lib/videos.mjs): one folder per video a session made — scenes, narration, answer slides.
+  const videos = { dir: env.BEARCLAW_VIDEOS_DIR ? path.resolve(expandHome(env.BEARCLAW_VIDEOS_DIR, home)) : path.join(bearclawStateDir(env, home), 'videos') };
 
   return {
     self: self.trim(),
@@ -566,6 +568,7 @@ export function normalizeConfig(
     operator,
     push,
     claw,
+    videos,
     books,
     reviewPrompt,
   };

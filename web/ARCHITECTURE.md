@@ -50,6 +50,8 @@ lib/stacks.mjs        session stacks: `bearclaw stack` errors → HTTP, sibling 
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
 lib/notes.mjs         (also) the writable Brain / Notepad books: `?book=` on the notes routes, `write()` for PUT notes/file
+lib/videos.mjs        videos sessions made (~/.local/state/bearclaw/videos/<id>: video.json, scenes.js, narration, slides/): list, read, narration, answer slides
+lib/video-player.mjs  the sandboxed page a video's scenes draw on (GET /api/videos/<id>/player): the parent posts the clock and answer slides
 lib/push.mjs          push notifications: VAPID keys, devices, RFC 8291 encryption, the waiting/done watcher (docs/architecture.md → Push notifications)
 lib/peers.mjs         peer fetch + one-hop proxy (JSON bodies; uploads streamed up, files/raw streamed down, unbuffered)
 lib/api.mjs           /api/* request handling (no UI knowledge)
@@ -509,3 +511,24 @@ in the CLI own this; `bin/dev.sh` runs it in the foreground for development.
 ## Non-goals (v1)
 
 Auth, HTTPS, tmux sessions without Claude, ANSI colors, xterm.js, websockets, multi-user.
+
+## Videos
+
+A session can explain its work as a narrated video: the Videos tab (`#/videos/<id>`) plays it,
+and you pause it and ask by voice. The question goes to the session that made the video (the
+ordinary send route), with where you paused and the line you last heard; its final reply is read
+aloud (`/api/speak`) and it may write an answer slide (`slides/<name>.json`: `{ title, points?,
+code? }`) that goes on the film while the answer plays. One folder per video under
+`~/.local/state/bearclaw/videos` ($BEARCLAW_VIDEOS_DIR):
+
+| file | what |
+| --- | --- |
+| `video.json` | `{ title, session, host?, audio, scenes: [{ id, name, start, dur, visual, anchors, lines: [{ t0, t1, text }] }] }`, seconds on the narration's clock. `visual`: how long the scene's animation is; `anchors[k]`: the animation time line `k` starts at (between them, time is stretched) |
+| `scenes.js` | `SCENES.push(function (kit) { kit.scene(id, { init(kit), render(t) }) })` per scene: a pure function of the scene's own time, the Motion film's kit (`lib/video-player.mjs`) |
+| `narration.m4a` | the narration (also `.mp3`, `.wav`): the clock everything follows; the UI fetches it as a Blob so seeking needs no range requests |
+| `slides/*.json` | answer slides, written by the session while you ask |
+
+Voice in and out uses OpenAI when its keys are set, else ElevenLabs (`ELEVENLABS_API_KEY` in the
+Keychain: Scribe for speech-to-text, `eleven_multilingual_v2` for speech; `$ELEVENLABS_VOICE_ID`
+picks the voice). The same switch serves the composer's mic, voice memos and the operator.
+

@@ -18,7 +18,18 @@ import { createKiller } from './lib/kill.mjs';
 import { createAutoNamer, createSpawnNamer } from './lib/autoname.mjs';
 import { createGrouper } from './lib/grouping.mjs';
 import { createUploader } from './lib/uploads.mjs';
-import { SPEECH_KEY_NAME, createKeySource, createSpeaker, createTranscriber } from './lib/transcribe.mjs';
+import {
+  ELEVEN_DEFAULT_VOICE,
+  ELEVEN_KEY_NAME,
+  SPEECH_KEY_NAME,
+  createElevenSpeaker,
+  createElevenTranscriber,
+  createKeySource,
+  createSpeaker,
+  createTranscriber,
+  firstEnabled,
+} from './lib/transcribe.mjs';
+import { createVideos } from './lib/videos.mjs';
 import { createOperator } from './lib/operator.mjs';
 import { createCompleter } from './lib/complete.mjs';
 import { createFiles } from './lib/files.mjs';
@@ -129,11 +140,17 @@ const stacks = createStacks({
 // Session recovery: dormant sessions after a reboot (`bearclaw --local restore … --json`).
 const dormant = createDormant({ cli, log });
 // Voice: an OpenAI key for speech-to-text (voice prompts) and one for text-to-speech (the
-// operator's replies) — OPENAI_TEXT_TO_SPEECH_API_KEY, else the transcription key.
+// operator's replies) — OPENAI_TEXT_TO_SPEECH_API_KEY, else the transcription key. No OpenAI
+// key: ElevenLabs (ELEVENLABS_API_KEY) does both.
 const transcribeKey = createKeySource({ run });
 const ttsKey = createKeySource({ name: SPEECH_KEY_NAME, run });
 const speechKey = async () => (await ttsKey()) ?? (await transcribeKey());
-const transcriber = createTranscriber({ getKey: transcribeKey, log });
+const elevenKey = createKeySource({ name: ELEVEN_KEY_NAME, run });
+const transcriber = firstEnabled([createTranscriber({ getKey: transcribeKey, log }), createElevenTranscriber({ getKey: elevenKey, log })]);
+const speaker = firstEnabled([
+  createSpeaker({ getKey: speechKey, voice: config.operator.voice ?? undefined, log }),
+  createElevenSpeaker({ getKey: elevenKey, voice: process.env.ELEVENLABS_VOICE_ID?.trim() || ELEVEN_DEFAULT_VOICE, log }),
+]);
 // Voice memos: segments transcribed with the same key, titled by `claude -p`.
 const memos = createMemos({ ...config.memos, transcriber, ask: createClaudeAsk({ bin: claudeBin, run }), log });
 const spawner = createSpawner({ run, tmux: config.tmux, launcher: config.claude, launchers: config.launchers });
@@ -171,7 +188,9 @@ const handleApi = createApi({
   uploader,
   transcriber,
   memos,
-  speaker: createSpeaker({ getKey: speechKey, voice: config.operator.voice ?? undefined, log }),
+  speaker,
+  // Videos sessions made (narrated scenes you pause and ask about): ~/.local/state/bearclaw/videos.
+  videos: createVideos({ dir: config.videos.dir }),
   operator,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   completer: createCompleter({ home: os.homedir(), run }),

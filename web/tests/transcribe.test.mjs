@@ -96,3 +96,44 @@ test('upstream errors become 502 (429 stays 429), never a 401 the UI would misre
   const down = createTranscriber({ getKey: async () => 'sk', fetch: async () => { throw new Error('ECONNRESET'); } });
   await assert.rejects(down.transcribe(audioReq('abc'), ''), { status: 502 });
 });
+
+test('ElevenLabs: speech-to-text sends the file with its model, text-to-speech returns mp3 bytes', async () => {
+  const { createElevenSpeaker, createElevenTranscriber } = await import('../lib/transcribe.mjs');
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/speech-to-text')) return new Response(JSON.stringify({ text: ' Zašto tool? ' }), { status: 200 });
+    return new Response(Buffer.from('mp3'), { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+  };
+  const getKey = async () => 'xi-key';
+  const t = createElevenTranscriber({ getKey, fetch });
+  assert.deepEqual(await t.transcribe(audioReq('opus-bytes')), { text: 'Zašto tool?', model: 'scribe_v1' });
+  assert.equal(calls[0].init.headers['xi-api-key'], 'xi-key');
+  assert.equal(calls[0].init.body.get('model_id'), 'scribe_v1');
+  const s = createElevenSpeaker({ getKey, fetch, voice: 'v1' });
+  assert.equal((await s.speak('**Hello** there')).toString(), 'mp3');
+  assert.match(calls[1].url, /\/text-to-speech\/v1\?output_format=mp3_44100_128$/);
+  assert.deepEqual(JSON.parse(calls[1].init.body), { text: 'Hello there', model_id: 'eleven_multilingual_v2' });
+});
+
+test('ElevenLabs errors become 502 (429 stays 429); no key is a 501', async () => {
+  const { createElevenSpeaker } = await import('../lib/transcribe.mjs');
+  const fetch = async () => new Response(JSON.stringify({ detail: { message: 'quota exceeded' } }), { status: 401 });
+  await assert.rejects(createElevenSpeaker({ getKey: async () => 'k', fetch }).speak('hi'), { status: 502, message: /quota exceeded/ });
+  await assert.rejects(createElevenSpeaker({ getKey: async () => null, fetch }).speak('hi'), { status: 501 });
+});
+
+test('firstEnabled: the first provider with a key, asked again on every call', async () => {
+  const { firstEnabled } = await import('../lib/transcribe.mjs');
+  let openai = false;
+  const a = { voice: 'alloy', enabled: async () => openai, speak: async () => 'a' };
+  const b = { voice: 'matilda', enabled: async () => true, speak: async () => 'b' };
+  const s = firstEnabled([a, b]);
+  assert.equal(await s.enabled(), true);
+  assert.equal(s.voice, 'matilda');
+  assert.equal(await s.speak('x'), 'b');
+  openai = true;
+  assert.equal(await s.speak('x'), 'a');
+  const none = firstEnabled([{ ...a, enabled: async () => false }]);
+  assert.equal(await none.enabled(), false);
+});

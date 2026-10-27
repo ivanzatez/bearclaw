@@ -57,6 +57,8 @@ import type {
   PrWorktree,
   PrsResponse,
   UsageResponse,
+  Video,
+  VideoSummary,
 } from './types'
 import type { GroupEdit } from '@/lib/groups'
 
@@ -205,6 +207,26 @@ export const api = {
     }
     return res.blob()
   },
+  /** Videos sessions made (always this server). */
+  videos: (o: Opts = {}) => request<{ videos: VideoSummary[] }>('/api/videos', o),
+  video: (id: string, o: Opts = {}) => request<Video>(`/api/videos/${enc(id)}`, o),
+  /** The narration as a Blob: played from an object URL, it seeks without range requests. */
+  videoAudio: async (id: string, o: Opts = {}): Promise<Blob> => {
+    let res: Response
+    try {
+      res = await fetch(`/api/videos/${enc(id)}/audio`, { signal: o.signal })
+    } catch (err) {
+      if (isAbortError(err)) throw err
+      throw new ApiError('network unreachable', 0)
+    }
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      throw new ApiError(data?.error || `HTTP ${res.status}`, res.status, data)
+    }
+    return res.blob()
+  },
+  /** The sandboxed page the video's scenes draw on (an iframe's src). */
+  videoPlayerUrl: (id: string) => `/api/videos/${enc(id)}/player`,
   operator: (o: Opts = {}) => request<OperatorStatus>('/api/operator', o),
   startOperator: (o: Opts = {}) => request<OperatorStatus>('/api/operator', { ...o, method: 'POST', body: {} }),
 

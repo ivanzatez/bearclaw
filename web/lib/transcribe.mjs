@@ -219,3 +219,99 @@ export function createSpeaker({ getKey, model = DEFAULT_SPEECH_MODEL, voice = DE
 
   return { enabled, voice, speak };
 }
+
+// ElevenLabs: the other provider, for both directions, with its own key (Keychain item
+// ELEVENLABS_API_KEY). The server takes OpenAI where its key is set, else this.
+export const ELEVEN_KEY_NAME = 'ELEVENLABS_API_KEY';
+export const ELEVEN_TRANSCRIBE_MODEL = 'scribe_v1';
+export const ELEVEN_SPEECH_MODEL = 'eleven_multilingual_v2';
+// "Matilda" (premade): calm and clear, for explanations. $ELEVENLABS_VOICE_ID overrides it.
+export const ELEVEN_DEFAULT_VOICE = 'XrExE9yKIg1WjnnlVkGX';
+const ELEVEN_BASE = 'https://api.elevenlabs.io/v1';
+
+async function elevenCall(url, init, { fetch, timeoutMs, log, what }) {
+  let res;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    const timedOut = err?.name === 'TimeoutError';
+    throw new HttpError(timedOut ? `${what} timed out` : `${what} service unreachable: ${err?.message ?? err}`, timedOut ? 504 : 502);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    const msg = data?.detail?.message || (typeof data?.detail === 'string' ? data.detail : null) || `HTTP ${res.status}`;
+    log(`${what}: ElevenLabs ${res.status}: ${msg}`);
+    throw new HttpError(`${what} failed: ${msg}`, res.status === 429 ? 429 : 502);
+  }
+  return res;
+}
+
+/** createTranscriber's shape over ElevenLabs speech-to-text (it takes no prompt: the hint is dropped). */
+export function createElevenTranscriber({ getKey, model = ELEVEN_TRANSCRIBE_MODEL, maxBytes = TRANSCRIBE_MAX_BYTES, fetch = globalThis.fetch, timeoutMs = 60 * 1000, log = () => {} }) {
+  const enabled = async () => Boolean(await getKey());
+
+  async function transcribeAudio(audio, type) {
+    const key = await getKey();
+    if (!key) throw new HttpError(`voice input is off: no ${ELEVEN_KEY_NAME} on this server`, 501);
+    const form = new FormData();
+    form.append('model_id', model);
+    form.append('file', new Blob([audio], { type }), `voice.${EXT[type]}`);
+    const res = await elevenCall(`${ELEVEN_BASE}/speech-to-text`, { method: 'POST', headers: { 'xi-api-key': key }, body: form }, { fetch, timeoutMs, log, what: 'transcription' });
+    const data = await res.json().catch(() => null);
+    return { text: String(data?.text ?? '').trim(), model };
+  }
+
+  async function transcribe(req) {
+    if (!(await getKey())) throw new HttpError(`voice input is off: no ${ELEVEN_KEY_NAME} on this server`, 501);
+    const type = audioType(req.headers?.['content-type']);
+    if (!type) throw new HttpError('expected an audio body (webm, ogg, mp4, mp3 or wav)', 415);
+    const audio = await readAudio(req, maxBytes);
+    if (!audio.length) throw new HttpError('empty recording', 400);
+    return transcribeAudio(audio, type);
+  }
+
+  return { enabled, transcribe, transcribeAudio };
+}
+
+/** createSpeaker's shape over ElevenLabs text-to-speech: mp3 bytes. */
+export function createElevenSpeaker({ getKey, model = ELEVEN_SPEECH_MODEL, voice = ELEVEN_DEFAULT_VOICE, fetch = globalThis.fetch, timeoutMs = 60 * 1000, log = () => {} }) {
+  const enabled = async () => Boolean(await getKey());
+
+  async function speak(text) {
+    const key = await getKey();
+    if (!key) throw new HttpError(`spoken replies are off: no ${ELEVEN_KEY_NAME} on this server`, 501);
+    const input = speechText(text);
+    if (!input) throw new HttpError('nothing to say', 400);
+    const res = await elevenCall(
+      `${ELEVEN_BASE}/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`,
+      { method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ text: input, model_id: model }) },
+      { fetch, timeoutMs, log, what: 'speech' },
+    );
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  return { enabled, voice, speak };
+}
+
+/**
+ * The first of `providers` (transcribers or speakers) that has its key, per call: a key added to
+ * the Keychain later takes over without a restart.
+ */
+export function firstEnabled(providers) {
+  let last = null;
+  const pick = async () => {
+    for (const p of providers) if (await p.enabled()) return (last = p);
+    return null;
+  };
+  const off = () => providers[providers.length - 1];
+  return {
+    enabled: async () => Boolean(await pick()),
+    // The voice of the provider the last call picked (settings asks enabled() first).
+    get voice() {
+      return (last ?? providers[0])?.voice ?? null;
+    },
+    transcribe: async (...a) => ((await pick()) ?? off()).transcribe(...a),
+    transcribeAudio: async (...a) => ((await pick()) ?? off()).transcribeAudio(...a),
+    speak: async (...a) => ((await pick()) ?? off()).speak(...a),
+  };
+}

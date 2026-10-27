@@ -30,11 +30,12 @@ import { SettingsScreen } from '@/screens/SettingsScreen'
 import { TasksScreen } from '@/screens/TasksScreen'
 import { TodoScreen } from '@/screens/TodoScreen'
 import { UsageScreen } from '@/screens/UsageScreen'
+import { VideosScreen } from '@/screens/VideosScreen'
 
 /**
  * Hash routing: `#/` (list), `#/s/<host>/<session_id>` (detail),
  * plus the terminal dashboard's tabs on the phone: `#/claw` (Claw), `#/todo`, `#/tasks`, `#/memory[/…]` (the brain), `#/notepad[/…]`,
- * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the bearclaw by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos) and `#/notes[/<host>[/<path>]]` (the notes explorer).
+ * plus `#/settings` (this viewer's preferences), `#/usage` (the subscription limits), `#/jobs` (scheduled jobs), `#/operator` (talk to the bearclaw by voice), `#/prs` (the GitHub PRs that need you), `#/memos[/<id>]` (voice memos), `#/videos[/<id>]` (videos sessions made, to watch and ask about) and `#/notes[/<host>[/<path>]]` (the notes explorer).
  * No server-side SPA fallback needed; the PWA start_url is `/#/`. Desktop and mobile use the
  * same routes, so links work across both.
  */
@@ -95,6 +96,9 @@ export default function App() {
                   </Route>
                   <Route path={/^\/memos(?:\/.*)?$/}>
                     <MemosScreen />
+                  </Route>
+                  <Route path={/^\/videos(?:\/.*)?$/}>
+                    <VideosScreen />
                   </Route>
                   <Route path={/^\/prs(?:\/.*)?$/}>
                     <PrsScreen />

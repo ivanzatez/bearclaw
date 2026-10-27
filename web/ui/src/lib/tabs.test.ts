@@ -3,7 +3,7 @@ import { expect, test } from 'vitest'
 import { TABS, activeTab } from './tabs'
 
 test('the tab row follows the terminal dashboard', () => {
-  expect(TABS.map((t) => t.label)).toEqual(['Sessions', 'Claw', 'PRs', 'Tasks', 'Todo', 'Memory', 'Notepad', 'Settings'])
+  expect(TABS.map((t) => t.label)).toEqual(['Sessions', 'Claw', 'PRs', 'Tasks', 'Todo', 'Memory', 'Notepad', 'Videos', 'Settings'])
 })
 
 test('activeTab maps a hash route to its tab', () => {
@@ -14,4 +14,5 @@ test('activeTab maps a hash route to its tab', () => {
   expect(activeTab('/usage')).toBeNull()
   expect(activeTab('/s/mac/abc')).toBeNull()
   expect(activeTab('/jobs')).toBeNull()
+  expect(activeTab('/videos/subagents')).toBe('videos')
 })

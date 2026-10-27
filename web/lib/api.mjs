@@ -31,9 +31,12 @@ import {
 import { DEFAULT_STACKS_MODEL } from './config.mjs';
 import { validateDormantRequest } from './dormant.mjs';
 import { validJobName } from './jobs.mjs';
+import { PLAYER_CSP } from './video-player.mjs';
 
 export const API_VERSION = 1;
 
+// Videos (lib/videos.mjs): the list, one video, its narration, its player page. Always this server.
+const VIDEOS_ROUTE = /^\/api\/videos(?:\/([^/]+)(?:\/(audio|player))?)?$/;
 const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|rename)$/;
 const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'rename']);
 
@@ -171,6 +174,7 @@ export function createApi({
   transcriber = null,
   memos = null,
   speaker = null,
+  videos = null,
   operator = null,
   files = null,
   completer = null,
@@ -658,6 +662,9 @@ export function createApi({
         stream: Readable.from([audio]),
       };
     }
+
+    const vd = VIDEOS_ROUTE.exec(url.pathname);
+    if (vd) return handleVideos(req, vd[1] ? decodeURIComponent(vd[1]) : null, vd[2] ?? null);
 
     // Claw (the dashboard's operator): GET its row on this host, POST finds or starts it.
     if (url.pathname === '/api/claw') return handleClaw(req);
@@ -1148,6 +1155,25 @@ export function createApi({
     if (err?.missing) return new HttpError(`this host's bearclaw has no \`${what}\` (update it)`, 501);
     return new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
   };
+
+  async function handleVideos(req, id, part) {
+    if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+    if (!videos) throw new HttpError('videos are not available on this server', 501);
+    if (!id) return { status: 200, body: { videos: await videos.list() } };
+    if (part === 'audio') {
+      const { type, bytes } = await videos.audio(id);
+      return { status: 200, headers: { 'content-type': type, 'content-length': bytes.length, 'cache-control': 'no-cache' }, stream: Readable.from([bytes]) };
+    }
+    if (part === 'player') {
+      const html = Buffer.from(await videos.player(id));
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-length': html.length, 'cache-control': 'no-store', 'content-security-policy': PLAYER_CSP },
+        stream: Readable.from([html]),
+      };
+    }
+    return { status: 200, body: await videos.get(id) };
+  }
 
   async function handleClaw(req) {
     if (req.method !== 'GET' && req.method !== 'POST') throw new HttpError('method not allowed', 405);
