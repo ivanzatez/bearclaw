@@ -7,12 +7,12 @@ pub mod loader;
 pub mod notes;
 pub mod pager;
 pub mod prs;
+pub mod qa;
 pub mod session;
 pub mod settings;
 pub mod tasks;
 pub mod todo;
 pub mod usage;
-pub mod videos;
 
 use std::path::PathBuf;
 
@@ -34,7 +34,7 @@ pub enum Tab {
     Usage,
     Brain,
     Notes,
-    Videos,
+    Qa,
     Settings,
 }
 
@@ -48,7 +48,7 @@ impl Tab {
         Tab::Usage,
         Tab::Brain,
         Tab::Notes,
-        Tab::Videos,
+        Tab::Qa,
         Tab::Settings,
     ];
 
@@ -62,7 +62,7 @@ impl Tab {
             Tab::Usage => "Usage",
             Tab::Brain => "Memory",
             Tab::Notes => "Notepad",
-            Tab::Videos => "Videos",
+            Tab::Qa => "QA",
             Tab::Settings => "Settings",
         }
     }
@@ -77,7 +77,7 @@ impl Tab {
             Tab::Usage => "Us",
             Tab::Brain => "Me",
             Tab::Notes => "No",
-            Tab::Videos => "Vi",
+            Tab::Qa => "QA",
             Tab::Settings => "St",
         }
     }
@@ -271,7 +271,7 @@ impl Tabs {
                     Tab::Usage => Box::new(usage::UsageView::new()),
                     Tab::Brain => Box::new(notes::NotesView::brain()),
                     Tab::Notes => Box::new(notes::NotesView::notepad()),
-                    Tab::Videos => Box::new(videos::VideosView::new()),
+                    Tab::Qa => Box::new(qa::QaView::new()),
                     Tab::Settings => Box::new(settings::SettingsView::new()),
                 };
                 Some((t, v))

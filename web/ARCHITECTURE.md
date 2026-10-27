@@ -50,6 +50,7 @@ lib/stacks.mjs        session stacks: `bearclaw stack` errors → HTTP, sibling 
 lib/editor.mjs        "Open in editor" links (vscode:// / cursor://, local folder or Remote-SSH)
 lib/notes.mjs         notes explorer: the `web.notes.root` sandbox, tree, frontmatter, built-in search / `searchCmd`
 lib/notes.mjs         (also) the writable Brain / Notepad books: `?book=` on the notes routes, `write()` for PUT notes/file
+lib/qa.mjs            QA sessions: the record (~/.local/state/bearclaw/qa/<id>/qa.json) and the presenter's first prompt (the beat format)
 lib/videos.mjs        videos sessions made (~/.local/state/bearclaw/videos/<id>: video.json, scenes.js, narration, slides/): list, read, narration, answer slides
 lib/video-player.mjs  the sandboxed page a video's scenes draw on (GET /api/videos/<id>/player): the parent posts the clock and answer slides
 lib/push.mjs          push notifications: VAPID keys, devices, RFC 8291 encryption, the waiting/done watcher (docs/architecture.md → Push notifications)
@@ -531,4 +532,18 @@ code? }`) that goes on the film while the answer plays. One folder per video und
 Voice in and out uses OpenAI when its keys are set, else ElevenLabs (`ELEVENLABS_API_KEY` in the
 Keychain: Scribe for speech-to-text, `eleven_multilingual_v2` for speech; `$ELEVENLABS_VOICE_ID`
 picks the voice). The same switch serves the composer's mic, voice memos and the operator.
+
+## QA sessions
+
+A QA session is a new Claude session (the presenter, tmux `qa-<id>`) that presents someone's
+work to you live, by voice, on the QA tab (`#/qa/<id>`). Every reply of the presenter is one
+beat: a few spoken sentences, then one slide in a fenced `slide` block (`{ title, points?, code?:
+{ path, start, text, highlight }, diagram?: { nodes, edges }, end? }`). The screen reads the
+speech aloud (`/api/speak`) as the slide goes up, and asks for the next beat while it plays
+(`[qa · c-N] continue`, one beat ahead). Tapping the mic interrupts: the voice stops, a presenter
+still working gets Escape, and your transcribed question goes as `[qa · q-…] question …`. The
+presenter answers from the real code (it only reads), and after the answer the talk goes on by
+itself unless you ask again. `lib/qa.mjs` keeps the record and writes the presenter's first
+prompt; everything else is the ordinary spawn / send / messages / keys routes. The dashboard's QA
+tab lists QA sessions and opens one in the browser.
 

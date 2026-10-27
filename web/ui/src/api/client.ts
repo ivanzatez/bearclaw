@@ -57,6 +57,7 @@ import type {
   PrWorktree,
   PrsResponse,
   UsageResponse,
+  QaRecord,
   Video,
   VideoSummary,
 } from './types'
@@ -207,6 +208,12 @@ export const api = {
     }
     return res.blob()
   },
+  /** QA sessions (always this server). */
+  qaSessions: (o: Opts = {}) => request<{ sessions: QaRecord[] }>('/api/qa', o),
+  qa: (id: string, o: Opts = {}) => request<QaRecord>(`/api/qa/${enc(id)}`, o),
+  /** A new QA session's record and its presenter's first prompt (spawn it next). */
+  createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en' }, o: Opts = {}) =>
+    request<QaRecord>('/api/qa', { ...o, method: 'POST', body }),
   /** Videos sessions made (always this server). */
   videos: (o: Opts = {}) => request<{ videos: VideoSummary[] }>('/api/videos', o),
   video: (id: string, o: Opts = {}) => request<Video>(`/api/videos/${enc(id)}`, o),

@@ -29,6 +29,7 @@ import {
   createTranscriber,
   firstEnabled,
 } from './lib/transcribe.mjs';
+import { createQa } from './lib/qa.mjs';
 import { createVideos } from './lib/videos.mjs';
 import { createOperator } from './lib/operator.mjs';
 import { createCompleter } from './lib/complete.mjs';
@@ -191,6 +192,8 @@ const handleApi = createApi({
   speaker,
   // Videos sessions made (narrated scenes you pause and ask about): ~/.local/state/bearclaw/videos.
   videos: createVideos({ dir: config.videos.dir }),
+  // QA sessions: a presenter session talks you through someone's work, live (lib/qa.mjs).
+  qa: createQa({ dir: config.qa.dir }),
   operator,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   completer: createCompleter({ home: os.homedir(), run }),

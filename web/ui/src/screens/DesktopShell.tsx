@@ -91,6 +91,7 @@ import { UsageScreen } from '@/screens/UsageScreen'
 import { JobsScreen } from '@/screens/JobsScreen'
 import { MemosScreen } from '@/screens/MemosScreen'
 import { OperatorScreen } from '@/screens/OperatorScreen'
+import { QaScreen } from '@/screens/QaScreen'
 import { VideosScreen } from '@/screens/VideosScreen'
 
 const parseBool01 = (raw: string) => (raw === '1' ? true : raw === '0' ? false : undefined)
@@ -118,6 +119,7 @@ export function DesktopShell() {
   const prsOpen = isPrsLocation(location)
   // `#/videos…`: a video and its questions take the whole window too.
   const videosOpen = location === '/videos' || location.startsWith('/videos/')
+  const qaOpen = location === '/qa' || location.startsWith('/qa/')
   // `#/notes…`: the notes explorer takes the whole window (no sidebar / board).
   const notesLoc = parseNotesLocation(location)
   const notesOpen = notesLoc !== null
@@ -288,7 +290,7 @@ export function DesktopShell() {
         setNewOpen(true)
         return true
       case 'back':
-        if (selectedKey || settingsOpen || usageOpen || jobsOpen || operatorOpen || memosOpen || notesOpen || prsOpen || videosOpen) {
+        if (selectedKey || settingsOpen || usageOpen || jobsOpen || operatorOpen || memosOpen || notesOpen || prsOpen || videosOpen || qaOpen) {
           navigate('/')
           return true
         }
@@ -571,7 +573,7 @@ export function DesktopShell() {
   ]
 
   // Anything but `/`, `/settings`, `/usage`, `/jobs`, `/prs`, notes and `/s/:host/:id` → the list (same as mobile).
-  if (!match && !settingsOpen && !usageOpen && !jobsOpen && !operatorOpen && !memosOpen && !notesOpen && !prsOpen && !videosOpen && location !== '/') return <Redirect to="/" replace />
+  if (!match && !settingsOpen && !usageOpen && !jobsOpen && !operatorOpen && !memosOpen && !notesOpen && !prsOpen && !videosOpen && !qaOpen && location !== '/') return <Redirect to="/" replace />
 
   const onSearchNav = (a: 'next' | 'prev' | 'open') => {
     if (a === 'open') {
@@ -618,6 +620,10 @@ export function DesktopShell() {
       ) : videosOpen ? (
         <main className="flex min-w-0 flex-1 flex-col">
           <VideosScreen layout="pane" />
+        </main>
+      ) : qaOpen ? (
+        <main className="flex min-w-0 flex-1 flex-col">
+          <QaScreen layout="pane" />
         </main>
       ) : board ? (
         <div ref={boardAreaRef} className="relative flex min-w-0 flex-1">
@@ -737,7 +743,7 @@ export function DesktopShell() {
         />
       )}
 
-      {board || notesOpen || prsOpen || videosOpen ? null : (
+      {board || notesOpen || prsOpen || videosOpen || qaOpen ? null : (
         <main className="flex min-w-0 flex-1" style={titlebarOffset(sidebarOpen ? sidebarW : '3rem')}>
           {pane ?? (
             <EmptyPane

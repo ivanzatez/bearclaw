@@ -260,6 +260,21 @@ export interface Video {
   slides: VideoSlide[]
 }
 
+/** A QA session (GET /api/qa/:id): a presenter session talks you through someone's work, live. */
+export interface QaRecord {
+  id: string
+  title: string
+  topic: string
+  /** The session whose work is presented. */
+  source: { host: string; session: string; title: string; cwd: string | null } | null
+  lang: 'hr' | 'en'
+  /** The presenter's tmux session: how the screen finds it in the bearclaw. */
+  presenter: { tmux: string }
+  createdAt: number
+  /** POST /api/qa only: the presenter's first prompt, to spawn it with. */
+  prompt?: string
+}
+
 /** GET /api/push, POST /api/push/subscribe — this device's notification preferences on the server. */
 export interface PushDevice {
   subscribed: boolean

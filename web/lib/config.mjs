@@ -236,7 +236,7 @@ export function resolveUiDir(uiRaw, { webRoot = null, home = os.homedir() } = {}
  *     grouping: { enabled, intervalMinutes, host }, uploads: { dir, maxMB, retentionDays },
  *     briefs: { enabled, model, idleMs, minIntervalMs, maxDeltaChars, maxCallsPerHour, minNewTurns,
  *               minNewChars, maxBriefChars, dir }, stacks: { sync, syncMinutes, generate, model },
- *     restore: { onBoot, markerFile }, push: { dir }, claw: { dir }, videos: { dir },
+ *     restore: { onBoot, markerFile }, push: { dir }, claw: { dir }, videos: { dir }, qa: { dir },
  *     books: { brain, notepad } (notes explorer configs), configFile, configFound }
  */
 export function normalizeConfig(
@@ -532,6 +532,8 @@ export function normalizeConfig(
   const claw = { dir: env.BEARCLAW_CLAW_DIR ? path.resolve(expandHome(env.BEARCLAW_CLAW_DIR, home)) : path.join(bearclawStateDir(env, home), 'claw') };
   // Videos (lib/videos.mjs): one folder per video a session made — scenes, narration, answer slides.
   const videos = { dir: env.BEARCLAW_VIDEOS_DIR ? path.resolve(expandHome(env.BEARCLAW_VIDEOS_DIR, home)) : path.join(bearclawStateDir(env, home), 'videos') };
+  // QA sessions (lib/qa.mjs): a presenter session talks you through someone's work; one record each.
+  const qa = { dir: env.BEARCLAW_QA_DIR ? path.resolve(expandHome(env.BEARCLAW_QA_DIR, home)) : path.join(bearclawStateDir(env, home), 'qa') };
 
   return {
     self: self.trim(),
@@ -569,6 +571,7 @@ export function normalizeConfig(
     push,
     claw,
     videos,
+    qa,
     books,
     reviewPrompt,
   };

@@ -25,3 +25,4 @@ import './jobs.test.mjs';
 import './memos.test.mjs';
 import './push.test.mjs';
 import './videos.test.mjs';
+import './qa.test.mjs';

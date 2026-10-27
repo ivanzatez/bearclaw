@@ -36,6 +36,8 @@ import { PLAYER_CSP } from './video-player.mjs';
 export const API_VERSION = 1;
 
 // Videos (lib/videos.mjs): the list, one video, its narration, its player page. Always this server.
+// QA sessions (lib/qa.mjs): list / create, one record. Always this server.
+const QA_ROUTE = /^\/api\/qa(?:\/([^/]+))?$/;
 const VIDEOS_ROUTE = /^\/api\/videos(?:\/([^/]+)(?:\/(audio|player))?)?$/;
 const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|rename)$/;
 const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'rename']);
@@ -175,6 +177,7 @@ export function createApi({
   memos = null,
   speaker = null,
   videos = null,
+  qa = null,
   operator = null,
   files = null,
   completer = null,
@@ -663,6 +666,8 @@ export function createApi({
       };
     }
 
+    const qm = QA_ROUTE.exec(url.pathname);
+    if (qm) return handleQa(req, qm[1] ? decodeURIComponent(qm[1]) : null);
     const vd = VIDEOS_ROUTE.exec(url.pathname);
     if (vd) return handleVideos(req, vd[1] ? decodeURIComponent(vd[1]) : null, vd[2] ?? null);
 
@@ -1155,6 +1160,14 @@ export function createApi({
     if (err?.missing) return new HttpError(`this host's bearclaw has no \`${what}\` (update it)`, 501);
     return new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
   };
+
+  async function handleQa(req, id) {
+    if (!qa) throw new HttpError('QA sessions are not available on this server', 501);
+    if (!id && req.method === 'POST') return { status: 200, body: await qa.create(await readJsonBody(req)) };
+    if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+    if (!id) return { status: 200, body: { sessions: await qa.list() } };
+    return { status: 200, body: await qa.get(id) };
+  }
 
   async function handleVideos(req, id, part) {
     if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
