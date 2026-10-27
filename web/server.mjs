@@ -30,8 +30,9 @@ import {
   firstEnabled,
 } from './lib/transcribe.mjs';
 import { createQa } from './lib/qa.mjs';
+import { createQaLive } from './lib/qa-live.mjs';
 import { createVideos } from './lib/videos.mjs';
-import { createOperator } from './lib/operator.mjs';
+import { apiBase, createOperator } from './lib/operator.mjs';
 import { createCompleter } from './lib/complete.mjs';
 import { createFiles } from './lib/files.mjs';
 import { createNotes } from './lib/notes.mjs';
@@ -156,6 +157,9 @@ const speaker = firstEnabled([
 const memos = createMemos({ ...config.memos, transcriber, ask: createClaudeAsk({ bin: claudeBin, run }), log });
 const spawner = createSpawner({ run, tmux: config.tmux, launcher: config.claude, launchers: config.launchers });
 const operator = createOperator({ config, bearclaw, spawner, backend, log });
+// QA sessions: the presenter talks through its MCP tools; a quick voice keeps the conversation going.
+const qaVoice = process.env.ELEVENLABS_VOICE_ID?.trim() || ELEVEN_DEFAULT_VOICE;
+const qaLive = createQaLive({ speaker: firstEnabled([createElevenSpeaker({ getKey: elevenKey, model: 'eleven_flash_v2_5', voice: qaVoice, log }), speaker]), log });
 // Push notifications: phones that subscribed hear when a session waits on them or finishes.
 // The merged bearclaw (the warm snapshot while someone is watching, else a fresh build), so a
 // peer's sessions count too.
@@ -193,7 +197,8 @@ const handleApi = createApi({
   // Videos sessions made (narrated scenes you pause and ask about): ~/.local/state/bearclaw/videos.
   videos: createVideos({ dir: config.videos.dir }),
   // QA sessions: a presenter session talks you through someone's work, live (lib/qa.mjs).
-  qa: createQa({ dir: config.qa.dir }),
+  qa: createQa({ dir: config.qa.dir, spawner, apiBase: apiBase(config) }),
+  qaLive,
   operator,
   files: createFiles({ home: os.homedir(), run, touched: createTouchedIndex(), roots: config.files.roots }),
   completer: createCompleter({ home: os.homedir(), run }),

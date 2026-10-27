@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Link, useLocation, useRoute } from 'wouter'
 
 import { ApiError, api } from '@/api/client'
-import type { Message, QaRecord, Session } from '@/api/types'
+import type { QaRecord, Session } from '@/api/types'
 import { QaSlide } from '@/components/QaSlide'
 import { ScreenHeader } from '@/components/ScreenHeader'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,7 @@ import { usePoller } from '@/hooks/usePoller'
 import { useSettings } from '@/hooks/useSettings'
 import { useVoice } from '@/hooks/useVoice'
 import { relTime } from '@/lib/format'
-import { type Beat, beatsOf, continueMessage, nextContinue, parseBeat, questionMessage, questionTag, workingOn } from '@/lib/qa'
+import { goOnByItself, nextOrdered, statusSince, toSlide, type QaEvent, type QaSlide as QaSlideData } from '@/lib/qa'
 import { allSessions, sessionHref } from '@/lib/sessions'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
@@ -60,15 +60,8 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
     if (!src && !topic.trim()) return toast.error('Pick a session or write a topic')
     setBusy(true)
     try {
+      // The server writes the presenter's workspace and starts it there.
       const qa = await api.createQa({ topic, lang, source: src ? { host: src.host, session: src.session_id, title: sessionTitle(src), cwd: src.cwd ?? null } : null })
-      const spawn = (dir?: string) => api.spawn(self, { name: qa.presenter.tmux, dir, prompt: qa.prompt ?? '' })
-      try {
-        await spawn(src?.cwd ?? undefined)
-      } catch (err) {
-        // Its folder is not a start directory: the first one.
-        if (!(err instanceof ApiError && err.status === 400 && src?.cwd)) throw err
-        await spawn()
-      }
       navigate(`/qa/${qa.id}`)
     } catch (err) {
       toast.error('QA session not started', { description: (err as Error)?.message })
@@ -137,7 +130,7 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
   )
 }
 
-// 50 ms of silence: played inside a tap, it lets this element play the answers that come later (iOS).
+// 50 ms of silence: played inside a tap, it lets this element play what comes later (iOS).
 function silentWav(): string {
   const n = 400
   const b = new Uint8Array(44 + n)
@@ -150,30 +143,30 @@ function silentWav(): string {
   return `data:audio/wav;base64,${btoa(String.fromCharCode(...b))}`
 }
 
-const AUTO_CONTINUE_MS = 6000
+/** After an answer, back to the talk when you stay quiet this long. */
+const GO_ON_MS = 5000
+/** Held longer than this, the mic button (or Space) is push-to-talk: letting go sends. */
+const HOLD_MS = 350
+
+const typingTarget = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))
 
 function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
   const { voice: canTranscribe } = useSettings()
   const { bearclaw } = useBearclaw()
   const [qa, setQa] = useState<QaRecord | null>(null)
-  const [msgs, setMsgs] = useState<Message[]>([])
-  const [status, setStatus] = useState<string | null>(null)
+  const [events, setEvents] = useState<QaEvent[]>([])
   const [started, setStarted] = useState(false)
   const [held, setHeld] = useState(false)
-  // talk: ask for the next beat on its own; answer: a question is being answered, then wait.
-  const [mode, setMode] = useState<'talk' | 'answer'>('talk')
-  const [playing, setPlaying] = useState<Beat | null>(null)
-  const [shown, setShown] = useState<{ tag: string; speech: string; slide: ReturnType<typeof parseBeat>['slide'] } | null>(null)
-  const [afterAnswer, setAfterAnswer] = useState(false)
-  const [ended, setEnded] = useState(false)
+  // The last ordered event played; what comes after it waits its turn.
+  const [cursor, setCursor] = useState(0)
+  const [speaking, setSpeaking] = useState<string | null>(null)
+  const [caption, setCaption] = useState('')
+  const [slide, setSlide] = useState<QaSlideData | null>(null)
+  const [listening, setListening] = useState<{ seq: number; goOn: boolean } | null>(null)
   const [typed, setTyped] = useState('')
-  const [played, setPlayed] = useState<ReadonlySet<string>>(() => new Set())
-  // Beats asked for before an interruption: never read out (the talk moved on).
-  const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set())
-  const sending = useRef<string | null>(null)
   const audio = useRef<HTMLAudioElement | null>(null)
-  const voiced = useRef(new Map<string, Promise<string>>())
-  const playingRef = useRef<string | null>(null)
+  const after = useRef(0)
+  const holdStart = useRef(0)
 
   usePoller(async (signal) => {
     try {
@@ -183,118 +176,93 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
     }
   }, 60_000)
   const presenter = presenterOf(allSessions(bearclaw), qa)
-  usePoller(
-    async (signal) => {
-      if (!presenter) return
-      const r = await api.messages(presenter.host, presenter.session_id, 200, { signal })
-      setMsgs(r.messages)
-      setStatus(r.status)
-    },
-    1000,
-    { enabled: Boolean(presenter) },
-  )
-  const beats = useMemo(() => beatsOf(msgs, status), [msgs, status])
+
+  // The live stream: long polls, back to back.
   useEffect(() => {
-    if (sending.current && beats.some((b) => b.tag === sending.current)) sending.current = null
-  }, [beats])
-  const queue = beats.filter((b) => b.done && b.reply && !played.has(b.tag) && !skipped.has(b.tag) && b.tag !== playing?.tag)
-  const pending = beats.find((b) => !b.done) ?? null
+    const ctl = new AbortController()
+    void (async () => {
+      while (!ctl.signal.aborted) {
+        try {
+          const r = await api.qaEvents(id, after.current, { signal: ctl.signal })
+          if (r.events.length) {
+            after.current = r.seq
+            setEvents((list) => [...list, ...r.events].slice(-500))
+          } else if (r.seq < after.current) after.current = r.seq
+        } catch (err) {
+          if (ctl.signal.aborted) return
+          void err
+          await new Promise((res) => setTimeout(res, 2000))
+        }
+      }
+    })()
+    return () => ctl.abort()
+  }, [id])
 
   useEffect(() => {
     const a = new Audio()
     a.preload = 'auto'
     audio.current = a
-    const cache = voiced.current
-    return () => {
-      a.pause()
-      cache.forEach((p) => p.then((u) => URL.revokeObjectURL(u)).catch(() => {}))
-    }
+    return () => a.pause()
   }, [])
 
-  const voice = useCallback((b: Beat, speech: string) => {
-    let p = voiced.current.get(b.tag)
-    if (!p) {
-      p = api.speak(speech).then((blob) => URL.createObjectURL(blob))
-      voiced.current.set(b.tag, p)
-    }
-    return p
-  }, [])
-
-  const finish = useCallback((b: Beat, endOfTalk: boolean) => {
-    setPlayed((p) => new Set(p).add(b.tag))
-    playingRef.current = null
-    setPlaying(null)
-    if (endOfTalk) setEnded(true)
-    if (b.kind === 'answer') setAfterAnswer(true)
-  }, [])
-
-  // Play the next beat that is ready: its slide goes up as its voice starts.
-  const next = queue[0]
+  // Play the stream in order: a slide goes up, a sentence is spoken, then the next.
+  const next = nextOrdered(events, cursor)
+  const stepRef = useRef<(e: QaEvent) => void>(() => {})
+  const step = useCallback((e: QaEvent) => stepRef.current(e), [])
   useEffect(() => {
-    if (!started || held || playingRef.current || !next) return
-    const a = audio.current
-    const { speech, slide } = parseBeat(next.reply ?? '')
-    playingRef.current = next.tag
-    const endOfTalk = Boolean(slide?.end)
-    const begin = () => {
-      setPlaying(next)
-      setShown((prev) => ({ tag: next.tag, speech, slide: slide ?? prev?.slide ?? null }))
+    if (!started || held || speaking || !next) return
+    // Stepped outside the effect's own pass (a render may land in between: then this one is off).
+    let live = true
+    void Promise.resolve().then(() => live && step(next))
+    return () => {
+      live = false
     }
-    if (!speech || !a) {
-      void Promise.resolve().then(() => {
-        begin()
-        finish(next, endOfTalk)
-      })
+  }, [started, held, speaking, next, step])
+
+  function stepImpl(next: QaEvent) {
+    if (next.type === 'slide') {
+      setSlide(toSlide(next.slide))
+      setCursor(next.seq)
       return
     }
-    voice(next, speech)
-      .then((url) => {
-        if (playingRef.current !== next.tag) return
-        begin()
-        a.onended = () => playingRef.current === next.tag && finish(next, endOfTalk)
-        a.src = url
-        return a.play()
-      })
-      .catch((err) => {
-        if (playingRef.current !== next.tag) return
-        toast.error('Could not read it aloud', { description: (err as Error)?.message })
-        begin()
-        finish(next, endOfTalk)
-      })
-  }, [started, held, playing, next, voice, finish])
-
-  // Have the following beat's voice ready before this one ends.
-  const after = queue.find((b) => b.tag !== next?.tag)
+    if (next.type === 'listening') {
+      setListening({ seq: next.seq, goOn: goOnByItself(events, next.seq) })
+      setCursor(next.seq)
+      return
+    }
+    const a = audio.current
+    if (!a || !next.sid) return setCursor(next.seq)
+    const sid = next.sid
+    setSpeaking(sid)
+    setListening(null)
+    setCaption(next.text ?? '')
+    const done = () => {
+      if (a.dataset.sid !== sid) return
+      a.dataset.sid = ''
+      setSpeaking(null)
+      setCursor(next.seq)
+      api.qaPlayed(id, sid).catch(() => {})
+    }
+    a.dataset.sid = sid
+    a.onended = done
+    a.onerror = done
+    a.src = api.qaAudioUrl(id, sid)
+    a.play().catch(done)
+  }
   useEffect(() => {
-    const b = playing ? next : after
-    if (b?.reply) void voice(b, parseBeat(b.reply).speech).catch(() => {})
-  }, [playing, next, after, voice])
+    stepRef.current = stepImpl
+  })
 
-  // Ask for the next beat while this one plays (one beat ahead, never more).
-  const last = beats[beats.length - 1]
-  const lastEnds = last?.reply ? Boolean(parseBeat(last.reply).slide?.end) : false
-  const micBusy = useRef(false)
+  // After an answer the presenter asks whether to go on: it does, unless you speak.
+  const goOn = useCallback(() => {
+    setListening(null)
+    api.qaContinue(id).catch(() => {})
+  }, [id])
   useEffect(() => {
-    if (!started || held || ended || mode !== 'talk' || !presenter || sending.current || micBusy.current) return
-    if (status === 'busy' || pending || queue.length > 0 || !last || lastEnds) return
-    const n = nextContinue(beats)
-    sending.current = `c-${n}`
-    api.send(presenter.host, presenter.session_id, continueMessage(n)).catch((err) => {
-      sending.current = null
-      toast.error('The presenter did not get "continue"', { description: (err as Error)?.message })
-    })
-  }, [started, held, ended, mode, presenter, status, pending, queue.length, last, lastEnds, beats])
-
-  // After an answer: back to the talk on its own, unless you ask again or hold it.
-  const resume = useCallback(() => {
-    setAfterAnswer(false)
-    setMode('talk')
-  }, [])
-  useEffect(() => {
-    if (!afterAnswer || held || ended) return
-    const t = window.setTimeout(resume, AUTO_CONTINUE_MS)
+    if (!listening?.goOn || held) return
+    const t = window.setTimeout(goOn, GO_ON_MS)
     return () => window.clearTimeout(t)
-  }, [afterAnswer, held, ended, resume])
+  }, [listening, held, goOn])
 
   const unlock = () => {
     const a = audio.current
@@ -302,85 +270,110 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
       a.src = silentWav()
       a.play().catch(() => {})
     }
-  }
-
-  /** Stop talking now: what is said and what was ready to be said next. */
-  const interrupt = () => {
-    audio.current?.pause()
-    const gone = beats.map((b) => b.tag)
-    if (playing) setPlayed((p) => new Set(p).add(playing.tag))
-    playingRef.current = null
-    setPlaying(null)
-    setSkipped((s) => new Set([...s, ...gone]))
-    setAfterAnswer(false)
-    if (presenter && status === 'busy') api.keys(presenter.host, presenter.session_id, 'Escape').catch(() => {})
-  }
-
-  const ask = async (question: string) => {
-    const q = question.trim()
-    if (!q || !presenter) return
-    const tag = questionTag()
-    sending.current = tag
-    setMode('answer')
-    setEnded(false)
-    try {
-      await api.send(presenter.host, presenter.session_id, questionMessage(tag, q, shown?.slide?.title ?? null))
-      setTyped('')
-    } catch (err) {
-      sending.current = null
-      toast.error('Question not sent', { description: (err as Error)?.message })
-    }
-  }
-
-  const mic = useVoice({ onText: (t) => void ask(t), hint: qa?.title ?? '' })
-  useEffect(() => {
-    micBusy.current = mic.state !== 'idle'
-  }, [mic.state])
-  const tick = useNow(500)
-  const onMic = () => {
-    if (mic.state === 'recording') return mic.stop()
-    if (mic.state === 'transcribing') return mic.cancel()
-    unlock()
     setStarted(true)
-    interrupt()
+  }
+
+  /** You start talking: the voice stops, what was queued is dropped, the presenter holds. */
+  const cutIn = () => {
+    const a = audio.current
+    if (a) {
+      a.pause()
+      a.dataset.sid = ''
+    }
+    setSpeaking(null)
+    setListening(null)
+    setCursor(after.current)
+    api.qaInterrupt(id).catch(() => {})
+  }
+
+  const ask = (text: string) => {
+    const q = text.trim()
+    if (!q) {
+      api.qaContinue(id).catch(() => {})
+      return
+    }
+    api.qaAsk(id, q).catch((err) => toast.error('Question not sent', { description: (err as Error)?.message }))
+  }
+
+  const mic = useVoice({ onText: ask, hint: qa?.title ?? '' })
+  const micState = useRef(mic.state)
+  useEffect(() => {
+    micState.current = mic.state
+  }, [mic.state])
+
+  const talk = () => {
+    if (micState.current !== 'idle') return
+    unlock()
+    cutIn()
+    holdStart.current = Date.now()
     void mic.start()
   }
+  const send = () => {
+    if (micState.current === 'recording') mic.stop()
+  }
+  const cancel = () => {
+    if (micState.current === 'idle') return
+    mic.cancel()
+    api.qaContinue(id).catch(() => {})
+  }
+  // The button: press and hold to talk (let go sends), or tap to start and tap again to send.
+  const onPress = () => (micState.current === 'recording' ? send() : talk())
+  const onRelease = () => {
+    if (micState.current === 'recording' && Date.now() - holdStart.current > HOLD_MS) send()
+  }
+
+  // Keys: hold Space to talk, M to start / send, Esc to cancel, C to go on.
+  const keys = useRef({ talk, send, cancel, goOn, onPress })
+  useEffect(() => {
+    keys.current = { talk, send, cancel, goOn, onPress }
+  })
+  useEffect(() => {
+    if (!canTranscribe) return
+    const down = (e: KeyboardEvent) => {
+      if (typingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.code === 'Space') {
+        e.preventDefault()
+        if (!e.repeat) keys.current.talk()
+      } else if (e.key === 'm' || e.key === 'M') keys.current.onPress()
+      else if (e.key === 'Escape') keys.current.cancel()
+      else if (e.key === 'c' || e.key === 'C') keys.current.goOn()
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !typingTarget(e.target)) keys.current.send()
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [canTranscribe])
+
   const onType = (e: FormEvent) => {
     e.preventDefault()
     unlock()
-    setStarted(true)
-    interrupt()
-    void ask(typed)
-  }
-  const onHold = () => {
-    if (held) {
-      setHeld(false)
-      if (playing) void audio.current?.play().catch(() => {})
-    } else {
-      setHeld(true)
-      audio.current?.pause()
-    }
+    cutIn()
+    ask(typed)
+    setTyped('')
   }
 
+  const tick = useNow(500)
+  const doing = statusSince(events, cursor)
+  const lastQuestion = events.findLast((e) => e.type === 'question')
   const line = (() => {
     if (!qa) return 'Loading…'
     if (!presenter) return 'Starting the presenter…'
     if (presenter.status === 'waiting') return `The presenter waits on you in its terminal${presenter.waiting_for ? `: ${presenter.waiting_for}` : ''}`
-    if (mic.state === 'recording') return `Listening… ${formatElapsed(tick - (mic.startedAt ?? tick))} — tap to send`
-    if (mic.state === 'transcribing') return 'Transcribing…'
-    if (!started) return beats.some((b) => b.done && b.reply) ? 'Ready: start when you are' : 'The presenter is getting ready…'
+    if (mic.state === 'recording') return `Listening… ${formatElapsed(tick - (mic.startedAt ?? tick))} — let go of Space (or tap) to send, Esc cancels`
+    if (mic.state === 'transcribing') return 'Got it…'
+    if (!started) return next ? 'Ready: start when you are' : `The presenter is getting ready…${doing ? ` ${doing}` : ''}`
     if (held) return 'On hold'
-    if (playing) return 'Speaking — tap the mic to interrupt'
-    if (pending) {
-      const doing = workingOn(msgs)
-      return `${pending.kind === 'answer' ? 'Looking into your question' : 'Preparing the next part'}…${doing ? ` ${doing}` : ''}`
-    }
-    if (afterAnswer) return 'Back to the talk in a moment — ask again or hold'
-    if (ended) return 'That was the talk. Ask anything.'
-    return ''
+    if (speaking) return canTranscribe ? 'Hold Space or the mic to cut in' : ''
+    if (listening) return listening.goOn ? 'Ask something else, or it goes on in a moment (C: now)' : 'Your turn: ask anything'
+    return doing ?? (lastQuestion && lastQuestion.seq > cursor ? 'Thinking about your question…' : 'Thinking…')
   })()
 
-  const history = beats.filter((b) => played.has(b.tag) && b.reply)
+  const said = events.filter((e) => (e.type === 'say' && e.seq <= cursor) || e.type === 'question')
 
   return (
     <div className={shell(layout)}>
@@ -400,50 +393,61 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
         </div>
       </ScreenHeader>
       <div className="mx-auto w-full max-w-4xl space-y-3 px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <QaSlide slide={shown?.slide ?? null} />
-        <p className="min-h-[3em] text-[15px] leading-relaxed">{shown?.speech ?? ''}</p>
+        <QaSlide slide={slide} />
+        <p className={cn('min-h-[3em] text-[15px] leading-relaxed transition-opacity', speaking ? 'opacity-100' : 'opacity-60')}>{caption}</p>
 
         <section aria-label="Talk to the presenter" className="space-y-3 rounded-xl border bg-card p-3">
           <div className="flex items-center gap-3">
             {!started ? (
-              <Button
-                onClick={() => {
-                  unlock()
-                  setStarted(true)
-                }}
-                disabled={!presenter}
-                className="h-12 rounded-full px-5"
-              >
+              <Button onClick={unlock} disabled={!presenter} className="h-12 rounded-full px-5">
                 <PlayIcon /> Start
               </Button>
             ) : canTranscribe ? (
               <button
                 type="button"
-                onClick={onMic}
-                aria-label={mic.state === 'recording' ? 'Send the question' : 'Interrupt and ask'}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  onPress()
+                }}
+                onPointerUp={onRelease}
+                onPointerLeave={onRelease}
+                onContextMenu={(e) => e.preventDefault()}
+                aria-label={mic.state === 'recording' ? 'Send the question' : 'Hold to talk'}
                 className={cn(
-                  'grid size-14 shrink-0 place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                  mic.state === 'recording' ? 'bg-status-error text-white' : 'bg-primary text-primary-foreground',
+                  'grid size-16 shrink-0 touch-none place-items-center rounded-full outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                  mic.state === 'recording' ? 'scale-110 bg-status-error text-white' : 'bg-primary text-primary-foreground',
                 )}
               >
-                {mic.state === 'recording' ? <SquareIcon className="size-5" fill="currentColor" /> : mic.state === 'transcribing' ? <Loader2Icon className="size-6 animate-spin" /> : <MicIcon className="size-6" />}
+                {mic.state === 'recording' ? <SquareIcon className="size-5" fill="currentColor" /> : mic.state === 'transcribing' ? <Loader2Icon className="size-6 animate-spin" /> : <MicIcon className="size-7" />}
               </button>
             ) : null}
             <p className="min-w-0 flex-1 text-sm text-muted-foreground">{line}</p>
             {started ? (
-              <Button variant="outline" size="icon" className="size-10 shrink-0 rounded-full" onClick={onHold} aria-label={held ? 'Go on' : 'Hold'}>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-10 shrink-0 rounded-full"
+                onClick={() => {
+                  setHeld((h) => !h)
+                  if (held) void audio.current?.play().catch(() => {})
+                  else audio.current?.pause()
+                }}
+                aria-label={held ? 'Go on' : 'Hold'}
+              >
                 {held ? <PlayIcon /> : <PauseIcon />}
               </Button>
             ) : null}
           </div>
-          {afterAnswer && !ended ? (
+          {listening ? (
             <div className="flex gap-2">
-              <Button size="sm" onClick={resume}>
-                Continue the talk
+              <Button size="sm" onClick={goOn}>
+                Go on
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setAfterAnswer(false)}>
-                Wait
-              </Button>
+              {listening.goOn ? (
+                <Button size="sm" variant="ghost" onClick={() => setListening({ ...listening, goOn: false })}>
+                  Wait
+                </Button>
+              ) : null}
             </div>
           ) : null}
           <form onSubmit={onType} className="flex gap-2">
@@ -452,17 +456,17 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
               <SendIcon />
             </Button>
           </form>
+          {canTranscribe ? <p className="hidden text-xs text-dimmer md:block">Hold Space to talk · M starts and sends · Esc cancels · C goes on</p> : null}
         </section>
 
-        {history.length ? (
+        {said.length ? (
           <details className="rounded-xl border bg-card p-3 text-sm">
-            <summary className="cursor-pointer text-muted-foreground">What was said ({history.length})</summary>
-            <div className="mt-2 space-y-2">
-              {history.map((b) => (
-                <div key={b.tag} className="space-y-0.5">
-                  {b.question ? <p className="font-medium">You: {b.question}</p> : null}
-                  <p className="text-muted-foreground">{parseBeat(b.reply ?? '').speech}</p>
-                </div>
+            <summary className="cursor-pointer text-muted-foreground">What was said ({said.length})</summary>
+            <div className="mt-2 space-y-1.5">
+              {said.map((e) => (
+                <p key={e.seq} className={e.type === 'question' ? 'font-medium' : 'text-muted-foreground'}>
+                  {e.type === 'question' ? `You: ${e.text}` : e.text}
+                </p>
               ))}
             </div>
           </details>

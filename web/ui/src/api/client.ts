@@ -62,6 +62,7 @@ import type {
   VideoSummary,
 } from './types'
 import type { GroupEdit } from '@/lib/groups'
+import type { QaEvent } from '@/lib/qa'
 
 /** A failed request. `status` is the HTTP status, or 0 when the network is unreachable. */
 export class ApiError extends Error {
@@ -211,9 +212,18 @@ export const api = {
   /** QA sessions (always this server). */
   qaSessions: (o: Opts = {}) => request<{ sessions: QaRecord[] }>('/api/qa', o),
   qa: (id: string, o: Opts = {}) => request<QaRecord>(`/api/qa/${enc(id)}`, o),
-  /** A new QA session's record and its presenter's first prompt (spawn it next). */
-  createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en' }, o: Opts = {}) =>
+  /** A new QA session: its record and workspace, and its presenter started. */
+  createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en'; model?: string }, o: Opts = {}) =>
     request<QaRecord>('/api/qa', { ...o, method: 'POST', body }),
+  /** A QA session's live stream after `after`: a long poll (the server holds it ~20 s when quiet). */
+  qaEvents: (id: string, after: number, o: Opts = {}) => request<{ seq: number; events: QaEvent[] }>(`/api/qa/${enc(id)}/events?after=${after}`, o),
+  /** The voice of one sentence the presenter said (an <audio> src). */
+  qaAudioUrl: (id: string, sid: string) => `/api/qa/${enc(id)}/audio/${enc(sid)}`,
+  qaPlayed: (id: string, sid: string) => request<OkResponse>(`/api/qa/${enc(id)}/played`, { method: 'POST', body: { sid } }),
+  /** You started talking: the presenter stops and holds until your question. */
+  qaInterrupt: (id: string) => request<OkResponse>(`/api/qa/${enc(id)}/interrupt`, { method: 'POST', body: {} }),
+  qaAsk: (id: string, text: string) => request<OkResponse>(`/api/qa/${enc(id)}/ask`, { method: 'POST', body: { text } }),
+  qaContinue: (id: string) => request<OkResponse>(`/api/qa/${enc(id)}/continue`, { method: 'POST', body: {} }),
   /** Videos sessions made (always this server). */
   videos: (o: Opts = {}) => request<{ videos: VideoSummary[] }>('/api/videos', o),
   video: (id: string, o: Opts = {}) => request<Video>(`/api/videos/${enc(id)}`, o),

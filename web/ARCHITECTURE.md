@@ -535,15 +535,23 @@ picks the voice). The same switch serves the composer's mic, voice memos and the
 
 ## QA sessions
 
-A QA session is a new Claude session (the presenter, tmux `qa-<id>`) that presents someone's
-work to you live, by voice, on the QA tab (`#/qa/<id>`). Every reply of the presenter is one
-beat: a few spoken sentences, then one slide in a fenced `slide` block (`{ title, points?, code?:
-{ path, start, text, highlight }, diagram?: { nodes, edges }, end? }`). The screen reads the
-speech aloud (`/api/speak`) as the slide goes up, and asks for the next beat while it plays
-(`[qa · c-N] continue`, one beat ahead). Tapping the mic interrupts: the voice stops, a presenter
-still working gets Escape, and your transcribed question goes as `[qa · q-…] question …`. The
-presenter answers from the real code (it only reads), and after the answer the talk goes on by
-itself unless you ask again. `lib/qa.mjs` keeps the record and writes the presenter's first
-prompt; everything else is the ordinary spawn / send / messages / keys routes. The dashboard's QA
-tab lists QA sessions and opens one in the browser.
+A QA session is a new Claude session (the presenter, tmux `qa-<id>`, Sonnet by default) that
+presents someone's work to you live, by voice, on the QA tab (`#/qa/<id>`), and that you interrupt
+with spoken questions. `lib/qa.mjs` gives it a workspace of its own (`~/.local/state/bearclaw/qa/<id>`:
+`qa.json`, a `CLAUDE.md` brief, `.mcp.json` and `.claude/settings.json`) and starts it there.
 
+It talks only through its MCP server (`bin/qa-mcp.mjs`, stdio, no dependencies), whose tools are
+held calls into `lib/qa-live.mjs` (`POST /api/qa/<id>/mcp/<tool>`):
+
+| tool | what |
+| --- | --- |
+| `say(text)` | a few spoken sentences; their voice is made at once (ElevenLabs flash); returns once the sentence before has been heard, so the next one is ready while this one plays |
+| `show(slide)` | `{ title, points?, code?: { path, start, text, highlight }, diagram?: { nodes, edges } }`, in order with the sentences |
+| `status(text)` | what it is doing now ("Reading x.ts"), shown at once |
+| `listen()` | waits for a question or "continue" |
+
+The screen long-polls `GET /api/qa/<id>/events`, plays it in order (`/audio/<sid>`, then `POST
+played`), and on the mic (hold Space or the button) posts `interrupt` (the queue is dropped, every
+tool call holds), then `ask` with the transcript: the waiting call returns `{ interrupted, question }`.
+A question no call takes within 4 s while the presenter is idle is typed into its terminal. The
+dashboard's QA tab lists QA sessions and opens one in the browser.

@@ -1,19 +1,22 @@
-// QA sessions: a new Claude session presents someone's work to you live, by voice — a beat at
-// a time (a few spoken sentences and one slide), and you interrupt it with spoken questions it
-// answers from the real code. The QA screen drives it with the ordinary send / messages / keys
-// routes and reads its replies aloud; this module only keeps the record of each QA session (one
-// folder under the QA dir, config qa.dir: ~/.local/state/bearclaw/qa/<id>/qa.json) and writes the
-// presenter's first prompt, which says how a beat looks.
+// QA sessions: a new Claude session (the presenter) presents someone's work to the user live,
+// by voice, and they interrupt it with spoken questions it answers from the real code. The
+// presenter talks through its MCP tools (bin/qa-mcp.mjs: say / show / listen / status), which
+// reach the QA screen at once through lib/qa-live.mjs. This module keeps one folder per QA
+// session under the QA dir (config qa.dir, ~/.local/state/bearclaw/qa/<id>): the record
+// (qa.json), and the presenter's workspace — its brief (CLAUDE.md), its MCP server (.mcp.json)
+// and settings that let it start without a prompt — and it starts the presenter there.
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { HttpError } from './http.mjs';
 
 export const QA_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** What every message the QA screen sends starts with; the first prompt carries `c-0`. */
-export const QA_MARK = '[qa · ';
 const LANGS = { hr: 'Croatian (Latin script)', en: 'English' };
+/** Fast enough to keep a conversation going; `model` in the request picks another. */
+export const DEFAULT_QA_MODEL = 'claude-sonnet-5-5';
+const MCP_SCRIPT = fileURLToPath(new URL('../bin/qa-mcp.mjs', import.meta.url));
 
 const slug = (s) =>
   String(s ?? '')
@@ -35,52 +38,81 @@ export function validateQa(body) {
       : null;
   if (!topic && !source) return { ok: false, error: 'a QA session needs a topic or a source session' };
   const lang = LANGS[body?.lang] ? body.lang : 'hr';
+  const model = typeof body?.model === 'string' && /^[A-Za-z0-9._[\]/:-]{1,100}$/.test(body.model) ? body.model : DEFAULT_QA_MODEL;
   const title = (typeof body?.title === 'string' && body.title.trim()) || source?.title || topic.split('\n')[0];
-  return { ok: true, title: title.slice(0, 120), topic, source, lang };
+  return { ok: true, title: title.slice(0, 120), topic, source, lang, model };
 }
 
-/** The presenter's first prompt: who it presents to, what, and the shape of every reply. */
-export function presenterPrompt(qa) {
+/** The presenter's CLAUDE.md: who it presents to, what, and how it talks (its MCP tools). */
+export function presenterBrief(qa) {
   const src = qa.source;
   const id = src?.session?.slice(0, 8);
   const lines = [
-    `${QA_MARK}c-0] # QA session: you present, live, by voice`,
+    '# QA session: you present, live, by voice',
     '',
-    'You present to the user live, by voice, in a QA session in the bearclaw web app. They see one slide at a time, hear every reply of yours read aloud, and can interrupt you at any moment with a spoken question. Make it feel like a colleague presenting their work at a whiteboard: short spoken beats, a slide that changes as you talk, the real code on screen when it helps.',
+    '<!-- Written by bearclaw-web when this QA session started. -->',
     '',
-    qa.topic ? `Topic: ${qa.topic}` : `Topic: the work of the session below — what it built or decided, why, and how it works.`,
+    'You present to the user live, by voice, in a QA session in the bearclaw web app. They see one slide at a time and hear what you say. They can cut in at any moment with a spoken question. Make it feel like a colleague at a whiteboard talking it through with them: short spoken sentences, a slide that changes as you go, the real code on screen when it helps, and real answers when they ask.',
+    '',
+    qa.topic ? `Topic: ${qa.topic}` : 'Topic: the work of the session below: what it built or decided, why, and how it works.',
   ];
   if (src) {
     lines.push(
-      `Source: the Claude session "${src.title || id}" (host ${src.host || 'this one'}, id ${src.session}${src.cwd ? `, in ${src.cwd}` : ''}) did this work. Learn it before you start: \`bearclaw brief ${id}\` (its summary, links and todos), \`bearclaw peek ${id} --lines 150\`, any artifact or document it links (read it), and the code it touched. Never message, interrupt or change that session.`,
+      `Source: the Claude session "${src.title || id}" (host ${src.host || 'this one'}, id ${src.session}${src.cwd ? `, in ${src.cwd}` : ''}) did this work. Learn it: \`bearclaw brief ${id}\` (its summary, links and todos), \`bearclaw peek ${id} --lines 150\`, any artifact or document it links (read it), and the code it touched. Never message, interrupt or change that session.`,
     );
   }
   lines.push(
     '',
-    '## Every reply is one beat',
+    '## How you talk: the `bearclaw-qa` tools, nothing else',
     '',
-    `- First the spoken part: two to five short sentences, said aloud. No markdown, lists, headings, code, paths or ids in it. Speak ${LANGS[qa.lang] ?? LANGS.hr}; keep English technical words as they are.`,
-    '- Then exactly one slide, as a fenced block at the very end of the reply:',
+    'The user hears and sees only what goes through these tools. Your ordinary replies reach nobody. So never end your turn: when you have nothing to say, call `listen()`.',
     '',
-    '```slide',
-    '{"title": "...", "points": ["..."], "code": {"path": "src/tools/x.ts", "start": 120, "text": "...", "highlight": [3, 4]}, "diagram": {"nodes": [{"id": "main", "label": "Main agent", "note": "one model"}, {"id": "sub", "label": "Subagent"}], "edges": [["main", "sub", "delegate_task"]]}}',
-    '```',
+    `- \`say(text)\`: one to three short spoken sentences. Plain speech: no markdown, code, paths or ids. Speak ${LANGS[qa.lang] ?? LANGS.hr}, and keep English technical words as they are. It returns once the sentence before it has been heard, so keep calling it with the next sentences. That is how the talk flows without pauses.`,
+    '- `show(slide)`: the slide for the point you are about to make, before you say it. It takes `title`, and any of `points` (up to 5, short), `code` (up to 18 lines copied from the real file, with `path`, `start` as the line number of its first line, and `highlight` for lines within the snippet, from 1), and `diagram` (up to 8 `nodes` {id, label, note}, `edges` [from, to, label]). One idea per slide.',
+    '- `status(text)`: before anything that takes more than a few seconds, one line on what you do ("Reading delegate-task-tool.ts").',
+    '- `listen()`: wait for the user. It returns their question, or `continue` (go on), or `waiting` (call it again).',
     '',
-    '  `title` always, then any of: `points` (up to 5, short), `code` (up to 18 lines copied from the real file; `start` is the line number of its first line; `highlight` lists lines within the snippet, from 1), `diagram` (up to 8 nodes; edges are [from, to, label?]). One idea per slide.',
-    '- The app sends "[qa · c-N] continue" for the next beat of the talk. Keep the talk to 6–10 beats. On the last one, invite questions and put `"end": true` in its slide.',
-    '- "[qa · q-…] question …" means the user interrupted you. Answer that question now, in this beat. If it needs the code, read the actual code first (files, git, gh), show what you found on the slide (the real snippet, or a diagram of it), then speak the answer. On the next continue, pick the talk back up where it fits, reshaping the rest of the plan around what they asked.',
-    '- You only read: change no files and run nothing that writes, so no permission prompt stops the talk.',
+    '## The talk',
     '',
-    'Start now: learn the source, plan the talk, and reply with beat 1: a title slide with what the talk will cover.',
+    '- First learn the source quickly: a minute, not ten. Say a first sentence early (what you will present) while you prepare the rest.',
+    '- Then 6–10 slides, each with two to six sentences of say. Keep moving from one to the next on your own.',
+    '- At the end, say that they can ask anything, and call `listen()`.',
+    '',
+    '## When they interrupt',
+    '',
+    'Any tool can return `interrupted` with their question. Then:',
+    '',
+    '1. Drop the point you were making.',
+    '2. At once, `say` one short sentence that shows you heard it ("Good question: let me open the delegate tool.").',
+    '3. If it needs the code, `status` and read the actual code (files, git, gh).',
+    '4. `show` what you found: the real snippet or a diagram of it.',
+    '5. `say` the answer in a few sentences, then ask whether to go on, and `listen()`.',
+    '6. On `continue`, pick the talk back up where it fits, reshaped by what they asked.',
+    '',
+    'You only read. Change no files and run nothing that writes.',
   );
-  return lines.join('\n');
+  return `${lines.join('\n')}\n`;
+}
+
+/** The workspace's MCP config: the bearclaw-qa server for this QA session. */
+export function presenterMcp(qa, { node, apiBase }) {
+  return { mcpServers: { 'bearclaw-qa': { command: node, args: [MCP_SCRIPT, '--base', apiBase, '--qa', qa.id] } } };
+}
+
+/** The workspace's settings: its MCP server on without asking, its tools without prompts. */
+export function presenterSettings() {
+  return {
+    enableAllProjectMcpServers: true,
+    enabledMcpjsonServers: ['bearclaw-qa'],
+    permissions: { allow: ['mcp__bearclaw-qa', 'Bash(bearclaw:*)', 'Read', 'Grep', 'Glob'] },
+  };
 }
 
 /**
- * @param {{ dir: string, now?: () => number }} opts
+ * @param {{ dir: string, spawner?: object, node?: string, apiBase?: string, now?: () => number }} opts
  * @returns {{ dir, list(), get(id), create(body) }}
  */
-export function createQa({ dir, now = Date.now }) {
+export function createQa({ dir, spawner = null, node = process.execPath, apiBase = 'http://127.0.0.1:7777/api', now = Date.now }) {
   function folder(id) {
     if (!QA_ID_RE.test(String(id))) throw new HttpError(`unknown QA session: ${id}`, 404);
     return path.join(dir, id);
@@ -120,16 +152,23 @@ export function createQa({ dir, now = Date.now }) {
 
     get: read,
 
-    /** A new QA session's record and the presenter's first prompt (the caller spawns it). */
+    /** A new QA session: its record and workspace, and its presenter started there. */
     async create(body) {
       const check = validateQa(body);
       if (!check.ok) throw new HttpError(check.error, 400);
       const { ok: _ok, ...fields } = check;
       const id = `${slug(fields.title) || 'qa'}-${randomBytes(2).toString('hex')}`;
       const qa = { id, ...fields, presenter: { tmux: `qa-${id}`.slice(0, 40) }, createdAt: now() };
-      await fs.mkdir(folder(id), { recursive: true });
-      await fs.writeFile(path.join(folder(id), 'qa.json'), `${JSON.stringify(qa, null, 1)}\n`);
-      return { ...qa, prompt: presenterPrompt(qa) };
+      const f = folder(id);
+      await fs.mkdir(path.join(f, '.claude'), { recursive: true });
+      await fs.writeFile(path.join(f, 'qa.json'), `${JSON.stringify(qa, null, 1)}\n`);
+      await fs.writeFile(path.join(f, 'CLAUDE.md'), presenterBrief(qa));
+      await fs.writeFile(path.join(f, '.mcp.json'), `${JSON.stringify(presenterMcp(qa, { node, apiBase }), null, 2)}\n`);
+      await fs.writeFile(path.join(f, '.claude', 'settings.json'), `${JSON.stringify(presenterSettings(), null, 2)}\n`);
+      if (spawner) {
+        await spawner.spawn({ name: qa.presenter.tmux, dir: f, prompt: 'Start the QA session now (CLAUDE.md says how).', nameGiven: true, model: qa.model, harness: 'claude' });
+      }
+      return qa;
     },
   };
 }

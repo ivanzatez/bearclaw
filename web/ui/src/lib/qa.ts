@@ -1,11 +1,6 @@
 // QA sessions (#/qa/<id>): pure helpers. A presenter session talks you through someone's work
-// a beat at a time (web/lib/qa.mjs writes its brief): each reply is a few spoken sentences and
-// one slide in a ```slide block. The screen sends "[qa · c-N] continue" for the next beat and
-// "[qa · q-…] question …" when you interrupt; these helpers read the beats back out of its
-// transcript.
-import type { Message } from '@/api/types'
-
-export const QA_MARK = '[qa · '
+// live with its MCP tools — say, show, listen, status (web/lib/qa.mjs writes its brief); the
+// screen plays the stream of what it says and shows (web/lib/qa-live.mjs), in order.
 
 export interface QaCode {
   path: string | null
@@ -28,29 +23,20 @@ export interface QaSlide {
   end: boolean
 }
 
-export interface Beat {
-  /** `c-3` (the talk's beat 3) or `q-ab12cd` (a question). */
-  tag: string
-  /** Order among the beats asked for. */
-  seq: number
-  kind: 'talk' | 'answer'
-  question: string | null
-  /** The presenter's reply; null while it works on it (or it was interrupted before replying). */
-  reply: string | null
-  /** Settled: replied and done, or passed (a later message came first). */
-  done: boolean
-}
-
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '')
 
 /** A slide's JSON → a slide, leniently; null when it has no title. */
 export function parseSlide(raw: string): QaSlide | null {
-  let s: Record<string, unknown>
   try {
-    s = JSON.parse(raw)
+    return toSlide(JSON.parse(raw))
   } catch {
     return null
   }
+}
+
+/** A slide as the presenter's `show` sent it → a slide, leniently; null when it has no title. */
+export function toSlide(raw: unknown): QaSlide | null {
+  const s = raw as Record<string, unknown>
   if (!s || typeof s !== 'object' || !str(s.title, 200).trim()) return null
   const code = s.code && typeof s.code === 'object' ? (s.code as Record<string, unknown>) : null
   const diagram = s.diagram && typeof s.diagram === 'object' ? (s.diagram as Record<string, unknown>) : null
@@ -84,71 +70,37 @@ export function parseSlide(raw: string): QaSlide | null {
   }
 }
 
-/** A reply → what is said (the slide and any code left out) and its slide. */
-export function parseBeat(reply: string): { speech: string; slide: QaSlide | null } {
-  const fence = /```slide\s*\n([\s\S]*?)(?:```|$)/g
-  let slide: QaSlide | null = null
-  for (const m of reply.matchAll(fence)) slide = parseSlide(m[1].trim()) ?? slide
-  const speech = reply
-    .replace(fence, ' ')
-    .replace(/```[\s\S]*?(```|$)/g, ' ')
-    .replace(/[*_`#>]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return { speech, slide }
+/** What the presenter's live stream carries (web/lib/qa-live.mjs). */
+export interface QaEvent {
+  seq: number
+  at: number
+  type: 'say' | 'slide' | 'status' | 'listening' | 'interrupt' | 'question'
+  sid?: string
+  text?: string
+  slide?: unknown
 }
 
-/** The beats in the presenter's transcript: every message the screen sent and the reply to it. */
-export function beatsOf(messages: Message[], status: string | null | undefined): Beat[] {
-  const out: Beat[] = []
-  messages.forEach((m, i) => {
-    if (m.kind !== 'user' || !m.text?.startsWith(QA_MARK)) return
-    const tag = m.text.slice(QA_MARK.length).split(']')[0].trim()
-    let reply: string | null = null
-    let passed = false
-    for (let j = i + 1; j < messages.length; j++) {
-      const n = messages[j]
-      if (n.kind === 'user' || n.role === 'user') {
-        passed = true
-        break
-      }
-      if (n.kind === 'assistant' && n.final !== false && n.text?.trim()) reply = n.text
-    }
-    const question = tag.startsWith('q-') ? m.text.replace(/^\[qa · [^\]]*\] question \(.*?\): /s, '').trim() : null
-    out.push({
-      tag,
-      seq: out.length,
-      kind: tag.startsWith('q-') ? 'answer' : 'talk',
-      question,
-      reply: passed || status !== 'busy' ? reply : null,
-      done: passed || (status !== 'busy' && !m.queued),
-    })
-  })
-  return out
+/** Played in order (a slide goes up after the sentences said before it); the rest shows at once. */
+export const ORDERED = new Set<QaEvent['type']>(['say', 'slide', 'listening'])
+
+/** The next event to play after `cursor`, if any. */
+export const nextOrdered = (events: QaEvent[], cursor: number) => events.find((e) => e.seq > cursor && ORDERED.has(e.type)) ?? null
+
+/**
+ * The presenter is listening at `seq`: go on by itself? Only right after answering a question
+ * (it asked whether to go on); at the end of the talk it waits for the user.
+ */
+export function goOnByItself(events: QaEvent[], seq: number): boolean {
+  const before = events.filter((e) => e.seq < seq)
+  const lastListen = before.findLast((e) => e.type === 'listening')?.seq ?? 0
+  return before.some((e) => e.type === 'question' && e.seq > lastListen)
 }
 
-/** The presenter's latest words while it works (narration between its tool calls), if any. */
-export function workingOn(messages: Message[]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m.kind === 'user') return null
-    if (m.kind === 'assistant' && m.text?.trim()) return m.text.trim().split('\n')[0].slice(0, 160)
-  }
-  return null
+/** The presenter's latest "what I am doing" line since it last spoke, if any. */
+export function statusSince(events: QaEvent[], cursor: number): string | null {
+  const s = events.findLast((e) => e.type === 'status')
+  return s && s.seq > cursor && s.text ? s.text : null
 }
-
-export const continueMessage = (n: number) => `${QA_MARK}c-${n}] continue`
-
-export function questionMessage(tag: string, question: string, slide: string | null): string {
-  return `${QA_MARK}${tag}] question (they interrupted you${slide ? ` on the slide "${slide}"` : ''}): ${question.trim()}`
-}
-
-/** The next talk beat's number: one after the highest `c-N` asked for. */
-export function nextContinue(beats: Beat[]): number {
-  return beats.reduce((n, b) => (b.tag.startsWith('c-') ? Math.max(n, Number(b.tag.slice(2)) + 1 || n) : n), 1)
-}
-
-export const questionTag = () => `q-${Math.random().toString(36).slice(2, 8)}`
 
 export interface Placed {
   id: string

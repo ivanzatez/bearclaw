@@ -1,57 +1,40 @@
 import { expect, test } from 'vitest'
 
-import type { Message } from '@/api/types'
-import { beatsOf, continueMessage, layoutDiagram, nextContinue, parseBeat, parseSlide, questionMessage, workingOn } from './qa'
+import { goOnByItself, layoutDiagram, nextOrdered, parseSlide, statusSince, toSlide, type QaEvent } from './qa'
 
-const reply = 'Glavni agent ostaje na jednom modelu. Subagent je tool.\n\n```slide\n{"title": "Subagent je tool", "points": ["delegate_task"], "code": {"path": "src/x.ts", "start": 120, "text": "a\\nb\\n", "highlight": [2]}}\n```'
-
-test('parseBeat splits what is said from its slide', () => {
-  const { speech, slide } = parseBeat(reply)
-  expect(speech).toBe('Glavni agent ostaje na jednom modelu. Subagent je tool.')
-  expect(slide?.title).toBe('Subagent je tool')
-  expect(slide?.code).toEqual({ path: 'src/x.ts', start: 120, text: 'a\nb', highlight: [2] })
-  expect(parseBeat('Just talk, **no** slide.')).toEqual({ speech: 'Just talk, no slide.', slide: null })
-  // A reply cut off inside its slide: no slide, and none of its JSON is read aloud.
-  expect(parseBeat('Said.\n```slide\n{"title": "Hal').speech).toBe('Said.')
-})
-
-test('parseSlide: a title is required; a diagram keeps only edges between its nodes', () => {
+test('a slide: a title is required; code is trimmed; a diagram keeps only edges between its nodes', () => {
   expect(parseSlide('{"points": ["x"]}')).toBeNull()
   expect(parseSlide('nope')).toBeNull()
-  const s = parseSlide(JSON.stringify({ title: 'T', end: true, diagram: { nodes: [{ id: 'a', label: 'A' }, { id: 'b' }], edges: [['a', 'b', 'calls'], ['a', 'zz']] } }))
+  expect(toSlide(null)).toBeNull()
+  const s = toSlide({
+    title: 'Subagent je tool',
+    end: true,
+    code: { path: 'src/x.ts', start: 120, text: 'a\nb\n', highlight: [2] },
+    diagram: { nodes: [{ id: 'a', label: 'A' }, { id: 'b' }], edges: [['a', 'b', 'calls'], ['a', 'zz']] },
+  })
+  expect(s?.code).toEqual({ path: 'src/x.ts', start: 120, text: 'a\nb', highlight: [2] })
   expect(s?.end).toBe(true)
   expect(s?.diagram?.nodes.map((n) => n.label)).toEqual(['A', 'b'])
   expect(s?.diagram?.edges).toEqual([['a', 'b', 'calls']])
 })
 
-const user = (text: string, queued?: boolean): Message => ({ role: 'user', kind: 'user', text, queued })
-const said = (text: string, final?: boolean): Message => ({ role: 'assistant', kind: 'assistant', text, final })
+const ev = (seq: number, type: QaEvent['type'], text?: string): QaEvent => ({ seq, at: seq, type, text, sid: type === 'say' ? String(seq) : undefined })
 
-test('beatsOf pairs every message the screen sent with its reply, and knows when it is settled', () => {
-  const list = [
-    user('[qa · c-0] # QA session…'),
-    said('Reading the brief.', false),
-    said('Beat one.'),
-    user(continueMessage(1)),
-    said('Beat two.'),
-    user(questionMessage('q-ab', 'zašto tool?', 'Subagent je tool')),
-    said('Let me look at the code.', false),
-  ]
-  const busy = beatsOf(list, 'busy')
-  expect(busy.map((b) => [b.tag, b.kind, b.reply, b.done])).toEqual([
-    ['c-0', 'talk', 'Beat one.', true],
-    ['c-1', 'talk', 'Beat two.', true],
-    ['q-ab', 'answer', null, false],
-  ])
-  expect(busy[2].question).toBe('zašto tool?')
-  const done = beatsOf([...list, said('Zato što cache ostaje topao.')], 'idle')
-  expect(done[2]).toMatchObject({ reply: 'Zato što cache ostaje topao.', done: true })
-  // Interrupted before it replied: settled, nothing to say.
-  const cut = beatsOf([user(continueMessage(2)), said('Starting…', false), user('[Request interrupted by user]')], 'idle')
-  expect(cut[0]).toMatchObject({ reply: null, done: true })
-  expect(nextContinue(done)).toBe(2)
-  expect(workingOn(list)).toBe('Let me look at the code.')
-  expect(workingOn([...list, user('x')])).toBeNull()
+test('the stream plays in order: sentences, slides and listening; status and questions show at once', () => {
+  const list = [ev(1, 'slide'), ev(2, 'status', 'Reading x.ts'), ev(3, 'say', 'Hi.'), ev(4, 'listening')]
+  expect(nextOrdered(list, 0)?.seq).toBe(1)
+  expect(nextOrdered(list, 1)?.seq).toBe(3)
+  expect(nextOrdered(list, 4)).toBeNull()
+  expect(statusSince(list, 1)).toBe('Reading x.ts')
+  expect(statusSince(list, 2)).toBeNull()
+})
+
+test('it goes on by itself only after answering a question, not at the end of the talk', () => {
+  const end = [ev(1, 'say', 'Ask anything.'), ev(2, 'listening')]
+  expect(goOnByItself(end, 2)).toBe(false)
+  const answered = [...end, ev(3, 'interrupt'), ev(4, 'question', 'why?'), ev(5, 'say', 'Because.'), ev(6, 'listening')]
+  expect(goOnByItself(answered, 6)).toBe(true)
+  expect(goOnByItself([...answered, ev(7, 'listening')], 7)).toBe(false)
 })
 
 test('layoutDiagram puts a node one column after whatever points at it', () => {
@@ -61,7 +44,6 @@ test('layoutDiagram puts a node one column after whatever points at it', () => {
   expect([at('user').x, at('main').x, at('fast').x, at('strong').x]).toEqual([0, 100, 200, 200])
   expect(at('fast').y).not.toBe(at('strong').y)
   expect([l.width, l.height]).toEqual([300, 100])
-  // A cycle settles instead of looping.
   const c = layoutDiagram({ nodes: [{ id: 'a', label: 'a', note: null }, { id: 'b', label: 'b', note: null }], edges: [['a', 'b', null], ['b', 'a', null]] })
   expect(c.nodes).toHaveLength(2)
 })

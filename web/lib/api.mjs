@@ -36,8 +36,9 @@ import { PLAYER_CSP } from './video-player.mjs';
 export const API_VERSION = 1;
 
 // Videos (lib/videos.mjs): the list, one video, its narration, its player page. Always this server.
-// QA sessions (lib/qa.mjs): list / create, one record. Always this server.
-const QA_ROUTE = /^\/api\/qa(?:\/([^/]+))?$/;
+// QA sessions (lib/qa.mjs, lib/qa-live.mjs): list / create, one record, its live event stream and
+// voice, the screen's interrupt / ask / continue, and the presenter's MCP calls. Always this server.
+const QA_ROUTE = /^\/api\/qa(?:\/([^/]+)(?:\/(events|played|interrupt|ask|continue|audio\/[0-9]+|mcp\/(?:say|show|listen|status)))?)?$/;
 const VIDEOS_ROUTE = /^\/api\/videos(?:\/([^/]+)(?:\/(audio|player))?)?$/;
 const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|rename)$/;
 const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'rename']);
@@ -178,6 +179,7 @@ export function createApi({
   speaker = null,
   videos = null,
   qa = null,
+  qaLive = null,
   operator = null,
   files = null,
   completer = null,
@@ -667,7 +669,7 @@ export function createApi({
     }
 
     const qm = QA_ROUTE.exec(url.pathname);
-    if (qm) return handleQa(req, qm[1] ? decodeURIComponent(qm[1]) : null);
+    if (qm) return handleQa(req, url, qm[1] ? decodeURIComponent(qm[1]) : null, qm[2] ?? null);
     const vd = VIDEOS_ROUTE.exec(url.pathname);
     if (vd) return handleVideos(req, vd[1] ? decodeURIComponent(vd[1]) : null, vd[2] ?? null);
 
@@ -1161,12 +1163,75 @@ export function createApi({
     return new HttpError(String(err?.message ?? err), err?.timedOut ? 504 : 502);
   };
 
-  async function handleQa(req, id) {
+  async function handleQa(req, url, id, part) {
     if (!qa) throw new HttpError('QA sessions are not available on this server', 501);
-    if (!id && req.method === 'POST') return { status: 200, body: await qa.create(await readJsonBody(req)) };
-    if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
-    if (!id) return { status: 200, body: { sessions: await qa.list() } };
-    return { status: 200, body: await qa.get(id) };
+    if (!id) {
+      if (req.method === 'POST') return { status: 200, body: await qa.create(await readJsonBody(req)) };
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return { status: 200, body: { sessions: await qa.list() } };
+    }
+    const record = await qa.get(id);
+    if (!part) {
+      if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
+      return { status: 200, body: record };
+    }
+    if (!qaLive) throw new HttpError('live QA is not available on this server', 501);
+    if (part === 'events') {
+      const after = Number(url.searchParams.get('after')) || 0;
+      return { status: 200, body: await qaLive.events(id, after) };
+    }
+    if (part.startsWith('audio/')) {
+      const audio = await qaLive.audio(id, part.slice('audio/'.length));
+      if (!audio) throw new HttpError('no such sentence', 404);
+      let bytes;
+      try {
+        bytes = await audio;
+      } catch (err) {
+        throw new HttpError(`no voice for it: ${err?.message ?? err}`, 502);
+      }
+      return { status: 200, headers: { 'content-type': 'audio/mpeg', 'content-length': bytes.length, 'cache-control': 'private, max-age=3600' }, stream: Readable.from([bytes]) };
+    }
+    if (req.method !== 'POST') throw new HttpError('method not allowed', 405);
+    const body = await readJsonBody(req);
+    switch (part) {
+      case 'played':
+        return { status: 200, body: qaLive.played(id, body.sid) };
+      case 'interrupt':
+        return { status: 200, body: qaLive.interrupt(id) };
+      case 'continue':
+        return { status: 200, body: qaLive.proceed(id) };
+      case 'ask': {
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        if (!text) throw new HttpError('text is required', 400);
+        const r = qaLive.ask(id, text);
+        handOver(record, id).catch((err) => logError?.(`qa ${id}: ${err?.message ?? err}`));
+        return { status: 200, body: r };
+      }
+      case 'mcp/say':
+        return { status: 200, body: await qaLive.say(id, body.text) };
+      case 'mcp/show':
+        return { status: 200, body: await qaLive.show(id, body) };
+      case 'mcp/status':
+        return { status: 200, body: await qaLive.status(id, body.text) };
+      case 'mcp/listen':
+        return { status: 200, body: await qaLive.listen(id) };
+      default:
+        throw new HttpError('not found', 404);
+    }
+  }
+
+  /**
+   * A question nobody took: the presenter is not in one of its tools (it ended its turn, or a long
+   * read). After a moment, if it is idle, type the question into its terminal instead.
+   */
+  async function handOver(record, id, waitMs = 4000) {
+    await sleep(waitMs);
+    if (!qaLive.pendingQuestion(id)) return;
+    const host = await bearclaw.localHost();
+    const presenter = host.ok ? host.sessions.find((s) => s.tmux_session === record.presenter.tmux) : null;
+    if (!presenter || presenter.status === 'busy') return;
+    const q = qaLive.takeQuestion(id);
+    if (q) await backend.send(presenter, `The user asked: "${q}". Answer it with your bearclaw-qa tools (say / show), then call listen().`);
   }
 
   async function handleVideos(req, id, part) {

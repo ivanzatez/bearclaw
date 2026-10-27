@@ -271,8 +271,7 @@ export interface QaRecord {
   /** The presenter's tmux session: how the screen finds it in the bearclaw. */
   presenter: { tmux: string }
   createdAt: number
-  /** POST /api/qa only: the presenter's first prompt, to spawn it with. */
-  prompt?: string
+  model?: string
 }
 
 /** GET /api/push, POST /api/push/subscribe — this device's notification preferences on the server. */
