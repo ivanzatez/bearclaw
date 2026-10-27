@@ -5,10 +5,10 @@ import { useIsDesktop } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/utils'
 
 /**
- * Sticky, translucent top bar with safe-area padding; content is centred at max-w-3xl. On the
+ * Sticky, translucent top bar with safe-area padding; content is centred at max-w-3xl (`wide`: max-w-6xl). On the
  * phone it starts with the tab row (`tabs={false}`: a screen off the row).
  */
-export function ScreenHeader({ children, className, tabs = true }: { children: ReactNode; className?: string; tabs?: boolean }) {
+export function ScreenHeader({ children, className, tabs = true, wide = false }: { children: ReactNode; className?: string; tabs?: boolean; wide?: boolean }) {
   const desktop = useIsDesktop()
   return (
     <header
@@ -17,7 +17,7 @@ export function ScreenHeader({ children, className, tabs = true }: { children: R
         className,
       )}
     >
-      <div className="mx-auto w-full max-w-3xl px-3 pt-2.5 pb-2">
+      <div className={cn('mx-auto w-full px-3 pt-2.5 pb-2', wide ? 'max-w-6xl' : 'max-w-3xl')}>
         {tabs && !desktop ? <TabBar /> : null}
         {children}
       </div>

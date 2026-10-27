@@ -452,3 +452,9 @@
 :root[data-shell="desktop"]:not([data-fullscreen="true"]) .titlebar-rail {
   padding-top: var(--titlebar-height, 56px);
 }
+
+/* QA: the presenter's speaking bars (screens/QaScreen.tsx). */
+@keyframes qa-bar {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}

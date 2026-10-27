@@ -12,18 +12,18 @@ const fluid = (min: number, cqw: number, max: number): CSSProperties => ({ fontS
 /** One presenter slide: its title, points, a code snippet and/or a boxes-and-arrows diagram. */
 export function QaSlide({ slide, className }: { slide: Slide | null; className?: string }) {
   if (!slide) {
-    return <div className={cn('grid min-h-56 place-items-center rounded-xl border bg-card text-sm text-muted-foreground', className)}>No slide yet</div>
+    return <div className={cn('grid min-h-56 place-items-center rounded-2xl bg-card px-6 text-center text-sm text-dimmer md:aspect-video', className)}>The first slide goes up when the presenter starts</div>
   }
   const visual = slide.code || slide.diagram
   return (
-    <div className={cn('@container rounded-xl border bg-card p-[4cqw] md:aspect-video', className)} style={{ containerType: 'inline-size' }}>
-      <div className={cn('flex h-full flex-col gap-[3cqw]', visual && slide.points.length ? 'md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:items-start' : '')}>
+    <div className={cn('@container min-h-56 rounded-2xl bg-card p-[5cqw] md:aspect-video', className)} style={{ containerType: 'inline-size' }}>
+      <div className={cn('flex h-full flex-col justify-center gap-[3cqw]', visual && slide.points.length ? 'md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:content-center md:items-center' : '')}>
         <div className="flex min-w-0 flex-col gap-[2cqw]">
-          <h2 className="font-bold tracking-tight text-balance text-foreground" style={{ ...fluid(19, 3.6, 40), lineHeight: 1.15 }}>
+          <h2 className="font-bold tracking-tight text-balance text-foreground" style={{ ...fluid(21, 4.4, 48), lineHeight: 1.1 }}>
             {slide.title}
           </h2>
           {slide.points.length ? (
-            <ul className="flex flex-col gap-[1.2cqw] text-muted-foreground" style={{ ...fluid(14, 2, 22), lineHeight: 1.4 }}>
+            <ul className="flex flex-col gap-[1.4cqw] text-muted-foreground" style={{ ...fluid(15, 2.35, 24), lineHeight: 1.4 }}>
               {slide.points.map((p, i) => (
                 <li key={i} className="flex gap-2">
                   <span className="mt-[0.55em] size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
@@ -49,15 +49,19 @@ function Code({ code }: { code: NonNullable<Slide['code']> }) {
   const hl = new Set(code.highlight)
   const width = String(code.start + lines.length - 1).length
   return (
-    <figure className="min-w-0 overflow-hidden rounded-lg border bg-muted/40">
-      {code.path ? <figcaption className="truncate border-b px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{code.path}</figcaption> : null}
-      <pre className="overflow-x-auto py-2 font-mono" style={{ ...fluid(11, 1.45, 15), lineHeight: 1.55 }}>
+    <figure className="min-w-0 overflow-hidden rounded-xl bg-terminal ring-1 ring-foreground/10">
+      {code.path ? (
+        <figcaption className="flex border-b border-foreground/10">
+          <span className="truncate border-r border-foreground/10 bg-foreground/5 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">{code.path}</span>
+        </figcaption>
+      ) : null}
+      <pre className="overflow-x-auto py-2.5 font-mono" style={{ ...fluid(11, 1.45, 15), lineHeight: 1.6 }}>
         {lines.map((l, i) => (
-          <div key={i} className={cn('flex px-3', hl.has(i + 1) && 'bg-primary/15')}>
+          <div key={i} className={cn('flex border-l-2 pr-3 pl-2.5', hl.has(i + 1) ? 'border-primary bg-primary/12' : 'border-transparent')}>
             <span className="mr-3 shrink-0 text-right text-dimmer tabular-nums select-none" style={{ width: `${width}ch` }}>
               {code.start + i}
             </span>
-            <span className="whitespace-pre text-foreground">{l || ' '}</span>
+            <span className="min-w-0 whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{l || ' '}</span>
           </div>
         ))}
       </pre>
@@ -66,9 +70,10 @@ function Code({ code }: { code: NonNullable<Slide['code']> }) {
 }
 
 function Diagram({ diagram }: { diagram: NonNullable<Slide['diagram']> }) {
-  const l = layoutDiagram(diagram, { colW: BOX_W + 80, rowH: BOX_H + 36 })
+  const gap = diagram.edges.some((e) => e[2]) ? 160 : 80
+  const l = layoutDiagram(diagram, { colW: BOX_W + gap, rowH: BOX_H + 36 })
   const pad = 8
-  const w = l.width - 80 + pad * 2
+  const w = l.width - gap + pad * 2
   const h = l.height - 36 + pad * 2
   const at = (id: string) => l.pos.get(id)!
   return (

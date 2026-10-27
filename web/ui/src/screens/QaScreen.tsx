@@ -360,24 +360,37 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
   const tick = useNow(500)
   const doing = statusSince(events, cursor)
   const lastQuestion = events.findLast((e) => e.type === 'question')
-  const line = (() => {
-    if (!qa) return 'Loading…'
-    if (!presenter) return 'Starting the presenter…'
-    if (presenter.status === 'waiting') return `The presenter waits on you in its terminal${presenter.waiting_for ? `: ${presenter.waiting_for}` : ''}`
-    if (mic.state === 'recording') return `Listening… ${formatElapsed(tick - (mic.startedAt ?? tick))} — let go of Space (or tap) to send, Esc cancels`
-    if (mic.state === 'transcribing') return 'Got it…'
-    if (!started) return next ? 'Ready: start when you are' : `The presenter is getting ready…${doing ? ` ${doing}` : ''}`
-    if (held) return 'On hold'
-    if (speaking) return canTranscribe ? 'Hold Space or the mic to cut in' : ''
-    if (listening) return listening.goOn ? 'Ask something else, or it goes on in a moment (C: now)' : 'Your turn: ask anything'
-    return doing ?? (lastQuestion && lastQuestion.seq > cursor ? 'Thinking about your question…' : 'Thinking…')
+  const slideNo = events.filter((e) => e.type === 'slide' && e.seq <= cursor).length
+  // Who has the floor, and the one line that says what happens next.
+  const floor: Floor = (() => {
+    if (!qa || (!presenter && !next)) return { who: 'wait', line: qa ? 'Starting the presenter…' : 'Loading…' }
+    if (presenter?.status === 'waiting') return { who: 'wait', line: `The presenter is stuck on a prompt in its terminal${presenter.waiting_for ? `: ${presenter.waiting_for}` : ''}` }
+    if (mic.state === 'recording') return { who: 'you', line: `You're talking (${formatElapsed(tick - (mic.startedAt ?? tick))})` }
+    if (mic.state === 'transcribing') return { who: 'you', line: 'Got it' }
+    if (!started) return next ? { who: 'ready', line: 'The presenter is ready' } : { who: 'wait', line: doing ?? 'The presenter is reading up' }
+    if (held) return { who: 'ready', line: 'On hold' }
+    if (speaking) return { who: 'presenter', line: 'Speaking' }
+    if (listening) return { who: 'ready', line: listening.goOn ? 'Going on in a moment, unless you ask' : 'Your turn: ask anything' }
+    return { who: 'thinking', line: doing ?? (lastQuestion && lastQuestion.seq > cursor ? 'Thinking about your question' : 'Preparing the next point') }
   })()
 
-  const said = events.filter((e) => (e.type === 'say' && e.seq <= cursor) || e.type === 'question')
+  const thread = events.filter((e) => (e.type === 'say' && e.seq <= cursor) || e.type === 'question')
+  const threadEnd = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    threadEnd.current?.scrollIntoView({ block: 'nearest' })
+  }, [thread.length])
+
+  const mainButton = !started ? (
+    <Button onClick={unlock} disabled={!presenter && !next} className="h-14 rounded-full px-6 text-base">
+      <PlayIcon /> Start
+    </Button>
+  ) : canTranscribe ? (
+    <MicButton state={mic.state} who={floor.who} onPress={onPress} onRelease={onRelease} />
+  ) : null
 
   return (
     <div className={shell(layout)}>
-      <ScreenHeader tabs={layout === 'screen'}>
+      <ScreenHeader tabs={layout === 'screen'} wide>
         <div className="flex min-h-8 items-center gap-1">
           <Button asChild variant="ghost" size="icon" className="-ml-2 size-9 shrink-0" aria-label="All QA sessions">
             <Link href="/qa">
@@ -387,91 +400,155 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
           <h1 className="min-w-0 flex-1 truncate text-lg font-bold tracking-tight">{qa?.title ?? 'QA'}</h1>
           {presenter ? (
             <Link href={sessionHref(presenter)} className="shrink-0 text-xs text-muted-foreground hover:text-foreground">
-              presenter
+              Open the presenter
             </Link>
           ) : null}
         </div>
       </ScreenHeader>
-      <div className="mx-auto w-full max-w-4xl space-y-3 px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <QaSlide slide={slide} />
-        <p className={cn('min-h-[3em] text-[15px] leading-relaxed transition-opacity', speaking ? 'opacity-100' : 'opacity-60')}>{caption}</p>
+      <div className="mx-auto w-full max-w-6xl px-4 pt-3 pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:pb-8">
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-6">
+          <div className="min-w-0 space-y-4">
+            <div className="space-y-1.5">
+              <QaSlide key={slideNo} slide={slide} className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300" />
+              {slideNo ? <p className="text-right text-xs text-dimmer tabular-nums">Slide {slideNo}</p> : null}
+            </div>
+            <p aria-live="polite" className={cn('min-h-[4.5rem] text-lg leading-snug text-balance transition-opacity duration-300 md:text-xl', speaking ? 'text-foreground' : 'text-muted-foreground')}>
+              {caption || (started ? '' : 'Press Start and the presenter begins. Cut in whenever you like.')}
+            </p>
 
-        <section aria-label="Talk to the presenter" className="space-y-3 rounded-xl border bg-card p-3">
-          <div className="flex items-center gap-3">
-            {!started ? (
-              <Button onClick={unlock} disabled={!presenter} className="h-12 rounded-full px-5">
-                <PlayIcon /> Start
-              </Button>
-            ) : canTranscribe ? (
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault()
-                  onPress()
-                }}
-                onPointerUp={onRelease}
-                onPointerLeave={onRelease}
-                onContextMenu={(e) => e.preventDefault()}
-                aria-label={mic.state === 'recording' ? 'Send the question' : 'Hold to talk'}
-                className={cn(
-                  'grid size-16 shrink-0 touch-none place-items-center rounded-full outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50',
-                  mic.state === 'recording' ? 'scale-110 bg-status-error text-white' : 'bg-primary text-primary-foreground',
-                )}
-              >
-                {mic.state === 'recording' ? <SquareIcon className="size-5" fill="currentColor" /> : mic.state === 'transcribing' ? <Loader2Icon className="size-6 animate-spin" /> : <MicIcon className="size-7" />}
-              </button>
-            ) : null}
-            <p className="min-w-0 flex-1 text-sm text-muted-foreground">{line}</p>
-            {started ? (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-10 shrink-0 rounded-full"
-                onClick={() => {
-                  setHeld((h) => !h)
-                  if (held) void audio.current?.play().catch(() => {})
-                  else audio.current?.pause()
-                }}
-                aria-label={held ? 'Go on' : 'Hold'}
-              >
-                {held ? <PlayIcon /> : <PauseIcon />}
-              </Button>
-            ) : null}
+            {/* The dock: on the phone it sits at the bottom, under the thumb. */}
+            <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+              <div className="mx-auto flex max-w-6xl items-center gap-4">
+                {mainButton}
+                <div className="min-w-0 flex-1">
+                  <FloorLine floor={floor} />
+                  {listening ? (
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" onClick={goOn}>
+                        Go on
+                      </Button>
+                      {listening.goOn ? (
+                        <Button size="sm" variant="ghost" onClick={() => setListening({ ...listening, goOn: false })}>
+                          Wait
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : canTranscribe && started ? (
+                    <p className="mt-1.5 hidden flex-wrap gap-x-4 gap-y-1 text-xs text-dimmer lg:flex">
+                      <span><Kbd>Space</Kbd> hold to talk</span>
+                      <span><Kbd>M</Kbd> start and send</span>
+                      <span><Kbd>Esc</Kbd> cancel</span>
+                      <span><Kbd>C</Kbd> go on</span>
+                    </p>
+                  ) : null}
+                </div>
+                {started ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 shrink-0 rounded-full"
+                    onClick={() => {
+                      setHeld((h) => !h)
+                      if (held) void audio.current?.play().catch(() => {})
+                      else audio.current?.pause()
+                    }}
+                    aria-label={held ? 'Go on' : 'Hold'}
+                  >
+                    {held ? <PlayIcon /> : <PauseIcon />}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </div>
-          {listening ? (
-            <div className="flex gap-2">
-              <Button size="sm" onClick={goOn}>
-                Go on
-              </Button>
-              {listening.goOn ? (
-                <Button size="sm" variant="ghost" onClick={() => setListening({ ...listening, goOn: false })}>
-                  Wait
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <form onSubmit={onType} className="flex gap-2">
-            <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="…or type a question" aria-label="Your question" className="h-9" />
-            <Button type="submit" size="icon" className="size-9 shrink-0" disabled={!typed.trim() || !presenter} aria-label="Ask">
-              <SendIcon />
-            </Button>
-          </form>
-          {canTranscribe ? <p className="hidden text-xs text-dimmer md:block">Hold Space to talk · M starts and sends · Esc cancels · C goes on</p> : null}
-        </section>
 
-        {said.length ? (
-          <details className="rounded-xl border bg-card p-3 text-sm">
-            <summary className="cursor-pointer text-muted-foreground">What was said ({said.length})</summary>
-            <div className="mt-2 space-y-1.5">
-              {said.map((e) => (
-                <p key={e.seq} className={e.type === 'question' ? 'font-medium' : 'text-muted-foreground'}>
-                  {e.type === 'question' ? `You: ${e.text}` : e.text}
-                </p>
-              ))}
+          <aside aria-label="The conversation" className="mt-6 lg:sticky lg:top-20 lg:mt-0 lg:flex lg:max-h-[calc(100dvh-7rem)] lg:flex-col">
+            <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Conversation</h2>
+            <div className="space-y-2 text-sm lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+              {thread.length ? (
+                thread.map((e) =>
+                  e.type === 'question' ? (
+                    <p key={e.seq} className="ml-8 rounded-2xl rounded-br-md bg-primary/15 px-3 py-2 text-foreground">
+                      {e.text}
+                    </p>
+                  ) : (
+                    <p key={e.seq} className="mr-4 leading-relaxed text-muted-foreground">
+                      {e.text}
+                    </p>
+                  ),
+                )
+              ) : (
+                <p className="text-dimmer">What you both say shows up here.</p>
+              )}
+              <div ref={threadEnd} />
             </div>
-          </details>
-        ) : null}
+            <form onSubmit={onType} className="mt-3 flex gap-2">
+              <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type a question instead" aria-label="Your question" className="h-9" />
+              <Button type="submit" size="icon" className="size-9 shrink-0" disabled={!typed.trim() || (!presenter && !next)} aria-label="Ask">
+                <SendIcon />
+              </Button>
+            </form>
+          </aside>
+        </div>
       </div>
     </div>
+  )
+}
+
+interface Floor {
+  /** you: you are talking; presenter: it is speaking; thinking: it works; ready: it waits on you; wait: not yet. */
+  who: 'you' | 'presenter' | 'thinking' | 'ready' | 'wait'
+  line: string
+}
+
+function Kbd({ children }: { children: string }) {
+  return <kbd className="rounded border bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground">{children}</kbd>
+}
+
+/** The floor in one line: speaking bars, your timer, or what the presenter is doing. */
+function FloorLine({ floor }: { floor: Floor }) {
+  return (
+    <p className={cn('flex min-w-0 items-center gap-2 text-sm', floor.who === 'you' ? 'text-status-error' : floor.who === 'presenter' ? 'text-primary' : 'text-muted-foreground')}>
+      {floor.who === 'presenter' ? (
+        <span className="flex h-4 shrink-0 items-end gap-[3px]" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className="w-[3px] rounded-full bg-primary motion-safe:animate-[qa-bar_0.9s_ease-in-out_infinite]" style={{ height: '100%', animationDelay: `${i * 0.15}s` }} />
+          ))}
+        </span>
+      ) : floor.who === 'thinking' || floor.who === 'wait' ? (
+        <Loader2Icon className="size-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
+      ) : null}
+      <span className="truncate">{floor.line}</span>
+    </p>
+  )
+}
+
+/** The mic: press and hold to talk, or tap to start and tap again to send. Its ring is the floor. */
+function MicButton({ state, who, onPress, onRelease }: { state: string; who: Floor['who']; onPress: () => void; onRelease: () => void }) {
+  const recording = state === 'recording'
+  return (
+    <button
+      type="button"
+      onPointerDown={(e) => {
+        e.preventDefault()
+        onPress()
+      }}
+      onPointerUp={onRelease}
+      onPointerLeave={onRelease}
+      onContextMenu={(e) => e.preventDefault()}
+      aria-label={recording ? 'Send the question' : 'Hold to talk'}
+      className={cn(
+        'relative grid size-16 shrink-0 touch-none place-items-center rounded-full outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/50 lg:size-[4.5rem]',
+        recording ? 'bg-status-error text-white' : 'bg-primary text-primary-foreground',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute -inset-1.5 rounded-full border-2',
+          recording ? 'border-status-error/60 motion-safe:animate-ping' : who === 'presenter' ? 'border-primary/40' : 'border-transparent',
+        )}
+      />
+      {recording ? <SquareIcon className="size-5" fill="currentColor" /> : state === 'transcribing' ? <Loader2Icon className="size-6 animate-spin" /> : <MicIcon className="size-7" />}
+    </button>
   )
 }
