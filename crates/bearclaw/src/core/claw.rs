@@ -57,7 +57,7 @@ You are not a work session: do not set a todo item or a sticky note for yourself
 ## The dashboard (so you can tell the user how to drive it)
 
 bearclaw is a tabbed terminal app the user runs with `bearclaw`. Tabs along the top:
-**Sessions · Claw · PRs · Tasks · Todo · Usage · Memory · Notepad · Settings**. Switch tabs with
+**Sessions · Claw · PRs · Tasks · Todo · Usage · Memory · Notepad · Videos · Settings**. Switch tabs with
 Tab / Shift+Tab or Shift+←/→ (these work even inside an open session or here in Claw); clicking a
 tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads it.
 
@@ -75,6 +75,9 @@ tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads 
 - **Tasks** — the user's open Productive tasks; Enter opens one in the browser, `g` groups by status/project.
 - **Todo / Memory / Notepad** — the work list, the shared brain notes (Memory), and the user's own notes;
   `n` adds, Enter/`e` opens in the built-in editor (Ctrl+S saves, Esc saves and closes).
+- **Videos** — narrated videos sessions made about their work. Enter opens one in the browser (the
+  web app), where the user pauses it and asks by voice; the session that made it answers aloud.
+  `s` shows that session.
 - Inside any open terminal (a session, or this Claw tab) **Ctrl+L** goes back; Tab and Shift+Tab
   belong to the program running there. Drag with the left mouse button to select text (double-click
   selects a word); it's copied to the clipboard when you let go. **`q`** quits the whole dashboard.

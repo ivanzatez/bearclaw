@@ -942,6 +942,8 @@ fn run_tui(o: WatchOpts) -> Result<()> {
             last_poll = Some(Instant::now());
             dash.dormant = crate::core::snapshot::dormant_count();
             dash.notes = load_notes(&rows);
+            // The tabs name sessions too (Videos: who answers): give them the titles first.
+            apply_titles(&mut rows, &naming.titles);
             tabs.live(&rows);
             // New sessions get a title, and a session whose first prompt has
             // landed since gets a better one. A no-op once the bearclaw is titled.

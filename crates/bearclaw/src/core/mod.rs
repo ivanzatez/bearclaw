@@ -26,4 +26,5 @@ pub mod tmux;
 pub mod todo;
 pub mod tools;
 pub mod usage;
+pub mod videos;
 pub mod webapi;

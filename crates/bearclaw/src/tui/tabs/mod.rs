@@ -12,6 +12,7 @@ pub mod settings;
 pub mod tasks;
 pub mod todo;
 pub mod usage;
+pub mod videos;
 
 use std::path::PathBuf;
 
@@ -33,11 +34,12 @@ pub enum Tab {
     Usage,
     Brain,
     Notes,
+    Videos,
     Settings,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 10] = [
         Tab::Sessions,
         Tab::Claw,
         Tab::Prs,
@@ -46,6 +48,7 @@ impl Tab {
         Tab::Usage,
         Tab::Brain,
         Tab::Notes,
+        Tab::Videos,
         Tab::Settings,
     ];
 
@@ -59,6 +62,7 @@ impl Tab {
             Tab::Usage => "Usage",
             Tab::Brain => "Memory",
             Tab::Notes => "Notepad",
+            Tab::Videos => "Videos",
             Tab::Settings => "Settings",
         }
     }
@@ -73,6 +77,7 @@ impl Tab {
             Tab::Usage => "Us",
             Tab::Brain => "Me",
             Tab::Notes => "No",
+            Tab::Videos => "Vi",
             Tab::Settings => "St",
         }
     }
@@ -266,6 +271,7 @@ impl Tabs {
                     Tab::Usage => Box::new(usage::UsageView::new()),
                     Tab::Brain => Box::new(notes::NotesView::brain()),
                     Tab::Notes => Box::new(notes::NotesView::notepad()),
+                    Tab::Videos => Box::new(videos::VideosView::new()),
                     Tab::Settings => Box::new(settings::SettingsView::new()),
                 };
                 Some((t, v))
