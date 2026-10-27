@@ -26,6 +26,9 @@ test('the stream plays in order: sentences, slides and listening; status and que
   expect(nextOrdered(list, 1)?.seq).toBe(3)
   expect(nextOrdered(list, 4)).toBeNull()
   expect(statusSince(list, 1)).toBe('Reading x.ts')
+  // Cut in: what was said before the interruption never plays, even if it arrives late.
+  const cut = [ev(1, 'say', 'Old.'), ev(2, 'say', 'Older, in flight.'), ev(3, 'interrupt'), ev(4, 'question', 'why?'), ev(5, 'say', 'Because.')]
+  expect(nextOrdered(cut, 1)?.text).toBe('Because.')
   expect(statusSince(list, 2)).toBeNull()
 })
 

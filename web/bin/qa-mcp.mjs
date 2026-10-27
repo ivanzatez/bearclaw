@@ -13,9 +13,12 @@ const arg = (name) => {
 const base = arg('base') ?? 'http://127.0.0.1:7777/api';
 const qa = arg('qa');
 
+const ANSWERING = { type: 'string', description: 'After an interruption: the id it gave you, in every say and show until you call listen().' };
+
 const SLIDE = {
   type: 'object',
   properties: {
+    answering: ANSWERING,
     title: { type: 'string' },
     points: { type: 'array', items: { type: 'string' }, description: 'Up to 5 short points.' },
     code: {
@@ -47,7 +50,7 @@ const TOOLS = [
     name: 'say',
     description:
       'Say this aloud to the user now: one to three short spoken sentences, plain speech (no markdown, code, paths or ids). Returns when the sentence before it has been heard, so call it again right away with the next sentences. If it returns {interrupted, question}, the user cut in: stop that point and answer the question.',
-    inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+    inputSchema: { type: 'object', properties: { text: { type: 'string' }, answering: ANSWERING }, required: ['text'] },
   },
   {
     name: 'show',
@@ -73,7 +76,10 @@ function reply(text) {
 /** A tool's answer, worded for the presenter. */
 function words(name, r) {
   if (r?.interrupted) {
-    return `The user interrupted you and asked: "${r.question}". Stop the point you were making. Acknowledge it in one short spoken sentence (say), look at the real code first if the question needs it (status while you do), show what you found, then say the answer. Then call listen().`;
+    return `The user interrupted you and asked: "${r.question}". Everything you had decided to say before this is dropped. Answer it now, passing answering: "${r.id}" in every say and show until you call listen(): acknowledge it in one short spoken sentence (say), look at the real code first if the question needs it (status while you do), show what you found, then say the answer, ask whether to go on, and call listen().`;
+  }
+  if (r?.dropped) {
+    return `Not said: the user interrupted you and asked: "${r.question}". Answer that first, passing answering: "${r.id}" in say and show, then call listen().`;
   }
   if (name === 'listen') {
     if (r?.continue) return 'The user wants you to go on: continue the talk where it fits, with show and say.';

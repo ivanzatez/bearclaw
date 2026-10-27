@@ -24,6 +24,7 @@ test('the brief: the source to learn, the tools to talk with, never ending the t
   assert.match(b, /Speak English/);
   assert.match(b, /never end your turn/);
   for (const tool of ['say(text)', 'show(slide)', 'status(text)', 'listen()']) assert.ok(b.includes(tool), tool);
+  assert.match(b, /without `answering: <id>` is not said/);
 });
 
 test('create writes the record and the workspace, and starts the presenter there', async () => {
@@ -71,10 +72,35 @@ test('interrupt drops what is queued and holds the presenter until the question,
   q.ask('a', 'Why a tool?');
   const [r1, r2] = await Promise.all([held, blocked]);
   const answers = [r1, r2].filter((r) => r.interrupted);
-  assert.deepEqual(answers, [{ interrupted: true, question: 'Why a tool?' }], 'exactly one call takes the question');
+  assert.deepEqual(answers, [{ interrupted: true, question: 'Why a tool?', id: 'q1' }], 'exactly one call takes the question');
   assert.equal(q.pendingQuestion('a'), null);
   const types = (await q.events('a', 0)).events.map((e) => e.type);
   assert.deepEqual(types, ['say', 'say', 'interrupt', 'question']);
+});
+
+test('the rest of a batch decided before the question is dropped; the answer, with its id, is said', async () => {
+  const q = live();
+  await q.say('a', 'Old one.');
+  const blocked = q.say('a', 'Old two.');
+  q.interrupt('a');
+  q.ask('a', 'Why a tool?');
+  const got = await blocked;
+  assert.deepEqual(got, { interrupted: true, question: 'Why a tool?', id: 'q1' });
+  // The calls the presenter had already decided, run right after: not said.
+  assert.deepEqual(await q.say('a', 'Old three.'), { dropped: true, question: 'Why a tool?', id: 'q1' });
+  assert.equal((await q.show('a', { title: 'Old slide' })).dropped, true);
+  // Its answer, passing the id, is.
+  assert.deepEqual(await q.show('a', { title: 'Why a tool', answering: 'q1' }), { ok: true });
+  assert.deepEqual(await q.say('a', 'Because the cache stays warm.', 'q1'), { ok: true });
+  const after = (await q.events('a', 0)).events.filter((e) => e.seq > 4);
+  assert.deepEqual(after.map((e) => [e.type, e.text ?? e.slide?.title]), [['slide', 'Why a tool'], ['say', 'Because the cache stays warm.']]);
+  assert.equal(after[0].slide.answering, undefined, 'the id is not part of the slide');
+  // listen() ends the answer: the talk goes on without the id.
+  const l = q.listen('a');
+  q.proceed('a');
+  assert.deepEqual(await l, { continue: true });
+  q.played('a', after[1].sid);
+  assert.deepEqual(await q.say('a', 'Back to the talk.'), { ok: true });
 });
 
 test('listen: a question, or continue; silence comes back as waiting; events long-poll', async () => {
@@ -83,7 +109,7 @@ test('listen: a question, or continue; silence comes back as waiting; events lon
   q.proceed('a');
   assert.deepEqual(await l, { continue: true });
   q.ask('a', 'And the credits?');
-  assert.deepEqual(await q.listen('a'), { interrupted: true, question: 'And the credits?' });
+  assert.deepEqual(await q.listen('a'), { interrupted: true, question: 'And the credits?', id: 'q1' });
   assert.deepEqual(await q.listen('a'), { waiting: true });
   const { seq } = await q.events('a', 0);
   const poll = q.events('a', seq);

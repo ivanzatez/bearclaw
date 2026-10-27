@@ -83,8 +83,14 @@ export interface QaEvent {
 /** Played in order (a slide goes up after the sentences said before it); the rest shows at once. */
 export const ORDERED = new Set<QaEvent['type']>(['say', 'slide', 'listening'])
 
-/** The next event to play after `cursor`, if any. */
-export const nextOrdered = (events: QaEvent[], cursor: number) => events.find((e) => e.seq > cursor && ORDERED.has(e.type)) ?? null
+/**
+ * The next event to play after `cursor`, if any. Nothing from before the last interruption: what
+ * was on its way when you cut in (still in flight to this page) is never played.
+ */
+export function nextOrdered(events: QaEvent[], cursor: number): QaEvent | null {
+  const cut = events.findLast((e) => e.type === 'interrupt')?.seq ?? 0
+  return events.find((e) => e.seq > cursor && e.seq > cut && ORDERED.has(e.type)) ?? null
+}
 
 /**
  * The presenter is listening at `seq`: go on by itself? Only right after answering a question

@@ -7,7 +7,10 @@
 //   listen()     the presenter has nothing more to say: waits for a question, or "continue"
 //   status(text) what it is doing right now (shown at once, not queued)
 // The user interrupts: what is queued is dropped and every presenter call holds until the
-// question arrives, which the next (or the waiting) call returns instead of its usual answer.
+// question arrives, which the next (or the waiting) call returns instead of its usual answer,
+// with an id. The presenter decides several calls at once (show, say, say), so the rest of the
+// batch it decided before it saw the question would still be said: until it calls listen(), a
+// say or show that does not pass `answering: <that id>` is dropped.
 
 /** Longest a presenter call waits before returning (well under any MCP tool timeout). */
 export const HOLD_MS = 45 * 1000;
@@ -24,7 +27,7 @@ export function createQaLive({ speaker, log = () => {}, holdMs = HOLD_MS, events
   function room(id) {
     let r = rooms.get(id);
     if (!r) {
-      r = { seq: 0, events: [], says: new Map(), order: [], hold: false, question: null, cont: false, wakers: new Set() };
+      r = { seq: 0, events: [], says: new Map(), order: [], hold: false, question: null, cont: false, wakers: new Set(), qn: 0, answering: null, asked: null };
       rooms.set(id, r);
     }
     return r;
@@ -67,8 +70,14 @@ export function createQaLive({ speaker, log = () => {}, holdMs = HOLD_MS, events
     if (r.question === null) return undefined;
     const q = r.question;
     r.question = null;
-    return { interrupted: true, question: q };
+    r.qn += 1;
+    r.answering = `q${r.qn}`;
+    r.asked = q;
+    return { interrupted: true, question: q, id: r.answering };
   };
+
+  /** A say or show decided before the presenter saw the question it is answering: not said. */
+  const stale = (r, answering) => (r.answering && answering !== r.answering ? { dropped: true, question: r.asked, id: r.answering } : undefined);
 
   return {
     /** The events after `after`, waiting up to `eventsMs` for one. */
@@ -92,9 +101,9 @@ export function createQaLive({ speaker, log = () => {}, holdMs = HOLD_MS, events
 
     // --- the presenter (MCP) --------------------------------------------------------------
 
-    async say(id, text) {
+    async say(id, text, answering) {
       const r = room(id);
-      const now = take(r);
+      const now = take(r) ?? stale(r, answering);
       if (now) return now;
       if (r.hold) return until(r, () => take(r) ?? (r.hold ? undefined : { ok: true, note: 'the user let you go on' }), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
       const words = String(text ?? '').trim();
@@ -115,9 +124,10 @@ export function createQaLive({ speaker, log = () => {}, holdMs = HOLD_MS, events
       );
     },
 
-    async show(id, slide) {
+    async show(id, body) {
+      const { answering, ...slide } = body ?? {};
       const r = room(id);
-      const now = take(r);
+      const now = take(r) ?? stale(r, answering);
       if (now) return now;
       if (r.hold) return until(r, () => take(r) ?? (r.hold ? undefined : { ok: true }), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
       push(r, { type: 'slide', slide });
@@ -131,6 +141,9 @@ export function createQaLive({ speaker, log = () => {}, holdMs = HOLD_MS, events
 
     async listen(id) {
       const r = room(id);
+      // The answer is given: the talk goes on without the question's id.
+      r.answering = null;
+      r.asked = null;
       const now = take(r);
       if (now) return now;
       if (r.cont && !r.hold) {

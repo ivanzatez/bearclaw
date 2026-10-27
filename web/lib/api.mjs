@@ -1208,7 +1208,7 @@ export function createApi({
         return { status: 200, body: r };
       }
       case 'mcp/say':
-        return { status: 200, body: await qaLive.say(id, body.text) };
+        return { status: 200, body: await qaLive.say(id, body.text, body.answering) };
       case 'mcp/show':
         return { status: 200, body: await qaLive.show(id, body) };
       case 'mcp/status':
