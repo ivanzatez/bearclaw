@@ -159,7 +159,7 @@ const spawner = createSpawner({ run, tmux: config.tmux, launcher: config.claude,
 const operator = createOperator({ config, bearclaw, spawner, backend, log });
 // QA sessions: the presenter talks through its MCP tools; a quick voice keeps the conversation going.
 const qaVoice = process.env.ELEVENLABS_VOICE_ID?.trim() || ELEVEN_DEFAULT_VOICE;
-const qaLive = createQaLive({ speaker: firstEnabled([createElevenSpeaker({ getKey: elevenKey, model: 'eleven_flash_v2_5', voice: qaVoice, log }), speaker]), log });
+const qaLive = createQaLive({ speaker: firstEnabled([createElevenSpeaker({ getKey: elevenKey, model: 'eleven_flash_v2_5', voice: qaVoice, log }), speaker]), dir: config.qa.dir, log });
 // Push notifications: phones that subscribed hear when a session waits on them or finishes.
 // The merged bearclaw (the warm snapshot while someone is watching, else a fresh build), so a
 // peer's sessions count too.

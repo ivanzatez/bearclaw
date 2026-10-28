@@ -216,7 +216,7 @@ export const api = {
   createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en'; model?: string }, o: Opts = {}) =>
     request<QaRecord>('/api/qa', { ...o, method: 'POST', body }),
   /** A QA session's live stream after `after`: a long poll (the server holds it ~20 s when quiet). */
-  qaEvents: (id: string, after: number, o: Opts = {}) => request<{ seq: number; events: QaEvent[] }>(`/api/qa/${enc(id)}/events?after=${after}`, o),
+  qaEvents: (id: string, after: number, o: Opts = {}) => request<{ seq: number; heard?: number; events: QaEvent[] }>(`/api/qa/${enc(id)}/events?after=${after}`, o),
   /** The voice of one sentence the presenter said (an <audio> src). */
   qaAudioUrl: (id: string, sid: string) => `/api/qa/${enc(id)}/audio/${enc(sid)}`,
   qaPlayed: (id: string, sid: string) => request<OkResponse>(`/api/qa/${enc(id)}/played`, { method: 'POST', body: { sid } }),

@@ -16,7 +16,7 @@ import { usePoller } from '@/hooks/usePoller'
 import { useSettings } from '@/hooks/useSettings'
 import { useVoice } from '@/hooks/useVoice'
 import { relTime } from '@/lib/format'
-import { goOnByItself, nextOrdered, statusSince, toSlide, type QaEvent, type QaSlide as QaSlideData } from '@/lib/qa'
+import { goOnByItself, nextOrdered, onlySounds, resumeAt, statusSince, toSlide, type QaEvent, type QaSlide as QaSlideData } from '@/lib/qa'
 import { allSessions, sessionHref } from '@/lib/sessions'
 import { sessionTitle } from '@/lib/title'
 import { cn } from '@/lib/utils'
@@ -167,6 +167,8 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
   const audio = useRef<HTMLAudioElement | null>(null)
   const after = useRef(0)
   const holdStart = useRef(0)
+  // You were here before: the page picks up where you had heard up to (the server keeps it).
+  const [resumable, setResumable] = useState(false)
 
   usePoller(async (signal) => {
     try {
@@ -183,7 +185,15 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
     void (async () => {
       while (!ctl.signal.aborted) {
         try {
+          const first = after.current === 0
           const r = await api.qaEvents(id, after.current, { signal: ctl.signal })
+          if (first && r.heard) {
+            const at = resumeAt(r.events, r.heard)
+            setCursor(r.heard)
+            setSlide(at.slide)
+            setCaption(at.caption)
+            setResumable(true)
+          }
           if (r.events.length) {
             after.current = r.seq
             setEvents((list) => [...list, ...r.events].slice(-500))
@@ -288,7 +298,8 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
 
   const ask = (text: string) => {
     const q = text.trim()
-    if (!q) {
+    // A tap with nothing said comes back as "[clicking]": no question, go on.
+    if (!q || onlySounds(q)) {
       api.qaContinue(id).catch(() => {})
       return
     }
@@ -367,7 +378,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
     if (presenter?.status === 'waiting') return { who: 'wait', line: `The presenter is stuck on a prompt in its terminal${presenter.waiting_for ? `: ${presenter.waiting_for}` : ''}` }
     if (mic.state === 'recording') return { who: 'you', line: `You're talking (${formatElapsed(tick - (mic.startedAt ?? tick))})` }
     if (mic.state === 'transcribing') return { who: 'you', line: 'Got it' }
-    if (!started) return next ? { who: 'ready', line: 'The presenter is ready' } : { who: 'wait', line: doing ?? 'The presenter is reading up' }
+    if (!started) return resumable ? { who: 'ready', line: 'Pick up where you left off' } : next ? { who: 'ready', line: 'The presenter is ready' } : { who: 'wait', line: doing ?? 'The presenter is reading up' }
     if (held) return { who: 'ready', line: 'On hold' }
     if (speaking) return { who: 'presenter', line: 'Speaking' }
     if (listening) return { who: 'ready', line: listening.goOn ? 'Going on in a moment, unless you ask' : 'Your turn: ask anything' }
@@ -382,7 +393,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
 
   const mainButton = !started ? (
     <Button onClick={unlock} disabled={!presenter && !next} className="h-14 rounded-full px-6 text-base">
-      <PlayIcon /> Start
+      <PlayIcon /> {resumable ? 'Resume' : 'Start'}
     </Button>
   ) : canTranscribe ? (
     <MicButton state={mic.state} who={floor.who} onPress={onPress} onRelease={onRelease} />

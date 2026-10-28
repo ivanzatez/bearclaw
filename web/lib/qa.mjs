@@ -89,7 +89,9 @@ export function presenterBrief(qa) {
     '5. `say` the answer in a few sentences, then ask whether to go on, and `listen()`. Pass `answering: <id>` in every `say` and `show` of the answer.',
     '6. On `continue`, pick the talk back up where it fits, reshaped by what they asked.',
     '',
-    'You only read. Change no files and run nothing that writes.',
+    '## Changing things',
+    '',
+    'When the user asks you to change something (code, a note, a file, a branch), do it: make the change, `show` the diff or the result, and `say` what you did. Change nothing nobody asked for, and never touch the source session.',
   );
   return `${lines.join('\n')}\n`;
 }
@@ -99,12 +101,12 @@ export function presenterMcp(qa, { node, apiBase }) {
   return { mcpServers: { 'bearclaw-qa': { command: node, args: [MCP_SCRIPT, '--base', apiBase, '--qa', qa.id] } } };
 }
 
-/** The workspace's settings: its MCP server on without asking, its tools without prompts. */
+/** The workspace's settings: its MCP server on without asking, its tools (writes too) without prompts. */
 export function presenterSettings() {
   return {
     enableAllProjectMcpServers: true,
     enabledMcpjsonServers: ['bearclaw-qa'],
-    permissions: { allow: ['mcp__bearclaw-qa', 'Bash(bearclaw:*)', 'Read', 'Grep', 'Glob'] },
+    permissions: { allow: ['mcp__bearclaw-qa', 'Bash', 'Read', 'Grep', 'Glob', 'Edit', 'Write'] },
   };
 }
 

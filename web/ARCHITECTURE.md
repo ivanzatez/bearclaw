@@ -553,5 +553,10 @@ held calls into `lib/qa-live.mjs` (`POST /api/qa/<id>/mcp/<tool>`):
 The screen long-polls `GET /api/qa/<id>/events`, plays it in order (`/audio/<sid>`, then `POST
 played`), and on the mic (hold Space or the button) posts `interrupt` (the queue is dropped, every
 tool call holds), then `ask` with the transcript: the waiting call returns `{ interrupted, question }`.
-A question no call takes within 4 s while the presenter is idle is typed into its terminal. The
+A question no call takes within 4 s while the presenter is idle is typed into its terminal. Each room is
+saved in the QA folder (`events.jsonl`, and `state.json` with how far the screen has heard), so leaving
+the page or restarting the server picks up where you left off; a sentence's voice is made again on
+demand. A question comes with an id, and until the presenter calls `listen()` a `say` or `show` without
+`answering: <id>` is dropped (the rest of a batch it decided before it saw the question). The presenter
+may change files when the user asks it to. The
 dashboard's QA tab lists QA sessions and opens one in the browser.

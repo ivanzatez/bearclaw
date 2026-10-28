@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import { goOnByItself, layoutDiagram, nextOrdered, parseSlide, statusSince, toSlide, type QaEvent } from './qa'
+import { goOnByItself, layoutDiagram, nextOrdered, onlySounds, parseSlide, resumeAt, statusSince, toSlide, type QaEvent } from './qa'
 
 test('a slide: a title is required; code is trimmed; a diagram keeps only edges between its nodes', () => {
   expect(parseSlide('{"points": ["x"]}')).toBeNull()
@@ -50,3 +50,17 @@ test('layoutDiagram puts a node one column after whatever points at it', () => {
   const c = layoutDiagram({ nodes: [{ id: 'a', label: 'a', note: null }, { id: 'b', label: 'b', note: null }], edges: [['a', 'b', null], ['b', 'a', null]] })
   expect(c.nodes).toHaveLength(2)
 })
+
+test('back on the page: the slide and sentence where you left off; a pause goes on by itself', () => {
+  const list = [{ ...ev(1, 'slide'), slide: { title: 'Intro' } }, ev(2, 'say', 'One.'), { ...ev(3, 'slide'), slide: { title: 'Next' } }, ev(4, 'say', 'Two.')]
+  expect(resumeAt(list, 2)).toEqual({ slide: toSlide({ title: 'Intro' }), caption: 'One.' })
+  expect(resumeAt(list, 0)).toEqual({ slide: null, caption: '' })
+  expect(goOnByItself([ev(1, 'say', 'Hello.'), { ...ev(2, 'listening'), away: true }], 2)).toBe(true)
+})
+
+test('a transcript of only sound tags is nothing said', () => {
+  expect(onlySounds('[clicking]')).toBe(true)
+  expect(onlySounds(' (music) [noise] ')).toBe(true)
+  expect(onlySounds('Why (exactly) a tool?')).toBe(false)
+})
+

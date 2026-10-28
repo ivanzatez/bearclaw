@@ -124,3 +124,42 @@ test('an unheard sentence times out into "call listen()" (the user has not start
   const r = await q.say('a', 'Anyone?');
   assert.match(r.note, /call listen\(\)/);
 });
+
+test('a room is saved: after a restart the screen gets what was said and how far it was heard', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bearclaw-qa-live-'));
+  await fs.mkdir(path.join(dir, 'talk-0001'));
+  const speak = async (t) => Buffer.from(`mp3:${t}`);
+  const a = createQaLive({ speaker: { speak }, dir, holdMs: 200, eventsMs: 50 });
+  await a.show('talk-0001', { title: 'Intro' });
+  await a.say('talk-0001', 'One.');
+  const first = (await a.events('talk-0001', 0)).events.find((e) => e.type === 'say');
+  a.played('talk-0001', first.sid);
+  await a.say('talk-0001', 'Two.');
+  await new Promise((r) => setTimeout(r, 50)); // the writes land
+
+  const b = createQaLive({ speaker: { speak }, dir, holdMs: 200, eventsMs: 50 });
+  const back = await b.events('talk-0001', 0);
+  assert.deepEqual(back.events.map((e) => e.type), ['slide', 'say', 'say']);
+  assert.equal(back.heard, Number(first.sid));
+  assert.equal(back.seq, 3);
+  // Its voice is made again on demand; the next event continues the numbering.
+  assert.equal((await b.audio('talk-0001', '3')).toString(), 'mp3:Two.');
+  await b.status('talk-0001', 'Reading x.ts');
+  assert.equal((await b.events('talk-0001', 3)).events[0].seq, 4);
+});
+
+test('a listen() after nobody heard the last sentence is a pause (away), not the end of the talk', async () => {
+  const q = live();
+  await q.say('a', 'Hello.');
+  await q.say('a', 'Anyone?'); // times out unheard
+  const l = q.listen('a');
+  const { events } = await q.events('a', 2);
+  assert.deepEqual(events.map((e) => [e.type, e.away]), [['listening', true]]);
+  q.proceed('a');
+  await l;
+  const again = q.listen('a');
+  const next = await q.events('a', 3);
+  assert.equal(next.events[0].away, undefined, 'only the first listen after it');
+  q.proceed('a');
+  await again;
+});

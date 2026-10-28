@@ -78,6 +78,8 @@ export interface QaEvent {
   sid?: string
   text?: string
   slide?: unknown
+  /** listening: the presenter paused because nobody heard it, not because the talk ended. */
+  away?: boolean
 }
 
 /** Played in order (a slide goes up after the sentences said before it); the rest shows at once. */
@@ -93,10 +95,12 @@ export function nextOrdered(events: QaEvent[], cursor: number): QaEvent | null {
 }
 
 /**
- * The presenter is listening at `seq`: go on by itself? Only right after answering a question
- * (it asked whether to go on); at the end of the talk it waits for the user.
+ * The presenter is listening at `seq`: go on by itself? Right after answering a question (it asked
+ * whether to go on), or when it only paused because nobody was listening; at the end of the talk it
+ * waits for the user.
  */
 export function goOnByItself(events: QaEvent[], seq: number): boolean {
+  if (events.find((e) => e.seq === seq)?.away) return true
   const before = events.filter((e) => e.seq < seq)
   const lastListen = before.findLast((e) => e.type === 'listening')?.seq ?? 0
   return before.some((e) => e.type === 'question' && e.seq > lastListen)
@@ -144,3 +148,13 @@ export function layoutDiagram(d: NonNullable<QaSlide['diagram']>, { colW = 260, 
   const nodes: Placed[] = d.nodes.map((n) => ({ ...n, ...pos.get(n.id)! }))
   return { nodes, edges: d.edges, width: dense.length * colW, height: rows * rowH, pos }
 }
+
+/** Where you left off: the slide up and the sentence said when you had heard up to `heard`. */
+export function resumeAt(events: QaEvent[], heard: number): { slide: QaSlide | null; caption: string } {
+  const before = events.filter((e) => e.seq <= heard)
+  return { slide: toSlide(before.findLast((e) => e.type === 'slide')?.slide), caption: before.findLast((e) => e.type === 'say')?.text ?? '' }
+}
+
+/** A transcript that is only sound tags ("[clicking]", "(music)"): nothing was said. */
+export const onlySounds = (text: string) => !text.replace(/\[[^\]]*\]|\([^)]*\)/g, '').trim()
+
