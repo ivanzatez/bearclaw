@@ -213,7 +213,7 @@ export const api = {
   qaSessions: (o: Opts = {}) => request<{ sessions: QaRecord[] }>('/api/qa', o),
   qa: (id: string, o: Opts = {}) => request<QaRecord>(`/api/qa/${enc(id)}`, o),
   /** A new QA session: its record and workspace, and its presenter started. */
-  createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en'; model?: string }, o: Opts = {}) =>
+  createQa: (body: { title?: string; topic?: string; source?: QaRecord['source']; lang: 'hr' | 'en'; model?: string; mode?: 'self' | 'new' }, o: Opts = {}) =>
     request<QaRecord>('/api/qa', { ...o, method: 'POST', body }),
   /** A QA session's live stream after `after`: a long poll (the server holds it ~20 s when quiet). */
   qaEvents: (id: string, after: number, o: Opts = {}) => request<{ seq: number; heard?: number; events: QaEvent[] }>(`/api/qa/${enc(id)}/events?after=${after}`, o),
@@ -224,6 +224,8 @@ export const api = {
   qaInterrupt: (id: string) => request<OkResponse>(`/api/qa/${enc(id)}/interrupt`, { method: 'POST', body: {} }),
   qaAsk: (id: string, text: string) => request<OkResponse>(`/api/qa/${enc(id)}/ask`, { method: 'POST', body: { text } }),
   qaContinue: (id: string) => request<OkResponse>(`/api/qa/${enc(id)}/continue`, { method: 'POST', body: {} }),
+  /** End the QA session: a presenter started for it is closed; a session presenting itself goes back to its work. */
+  qaEnd: (id: string) => request<OkResponse & { closes?: boolean }>(`/api/qa/${enc(id)}/end`, { method: 'POST', body: {} }),
   /** Videos sessions made (always this server). */
   videos: (o: Opts = {}) => request<{ videos: VideoSummary[] }>('/api/videos', o),
   video: (id: string, o: Opts = {}) => request<Video>(`/api/videos/${enc(id)}`, o),

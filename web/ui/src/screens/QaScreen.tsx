@@ -28,7 +28,8 @@ export function QaScreen({ layout = 'screen' }: { layout?: 'screen' | 'pane' }) 
   return open ? <QaLive key={params.id} id={params.id} layout={layout} /> : <QaList layout={layout} />
 }
 
-const presenterOf = (sessions: Session[], qa: QaRecord | null) => (qa ? (sessions.find((s) => s.tmux_session === qa.presenter.tmux) ?? null) : null)
+const presenterOf = (sessions: Session[], qa: QaRecord | null) =>
+  qa ? (sessions.find((s) => (qa.presenter.session && s.session_id === qa.presenter.session) || (qa.presenter.tmux && s.tmux_session === qa.presenter.tmux)) ?? null) : null
 const shell = (layout: 'screen' | 'pane') => cn('flex flex-col bg-background', layout === 'screen' ? 'min-h-app' : 'min-h-0 flex-1 overflow-y-auto')
 
 function QaList({ layout }: { layout: 'screen' | 'pane' }) {
@@ -40,7 +41,9 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
   const [error, setError] = useState<string | null>(null)
   const [source, setSource] = useState('')
   const [topic, setTopic] = useState('')
-  const [lang, setLang] = useState<'hr' | 'en'>('hr')
+  const [lang, setLang] = useState<'hr' | 'en'>('en')
+  // Who presents: the session itself (it keeps its context), or a new presenter started for it.
+  const [mode, setMode] = useState<'self' | 'new'>('self')
   const [busy, setBusy] = useState(false)
   usePoller(async (signal) => {
     try {
@@ -61,7 +64,7 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
     setBusy(true)
     try {
       // The server writes the presenter's workspace and starts it there.
-      const qa = await api.createQa({ topic, lang, source: src ? { host: src.host, session: src.session_id, title: sessionTitle(src), cwd: src.cwd ?? null } : null })
+      const qa = await api.createQa({ topic, lang, mode: src ? mode : 'new', source: src ? { host: src.host, session: src.session_id, title: sessionTitle(src), cwd: src.cwd ?? null, tmux: src.tmux_session ?? null } : null })
       navigate(`/qa/${qa.id}`)
     } catch (err) {
       toast.error('QA session not started', { description: (err as Error)?.message })
@@ -76,7 +79,7 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
       </ScreenHeader>
       <div className="mx-auto w-full max-w-3xl space-y-4 px-4 pt-3 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <form onSubmit={start} className="space-y-3 rounded-xl border bg-card p-3">
-          <p className="text-sm text-muted-foreground">A new session presents the work to you by voice, slide by slide. Interrupt it any time and ask: it answers from the real code.</p>
+          <p className="text-sm text-muted-foreground">A session presents its work to you by voice, slide by slide. Interrupt it any time and ask: it answers from the real code.</p>
           <select
             value={source}
             onChange={(e) => setSource(e.target.value)}
@@ -91,6 +94,28 @@ function QaList({ layout }: { layout: 'screen' | 'pane' }) {
             ))}
           </select>
           <Textarea value={topic} onChange={(e) => setTopic(e.target.value)} rows={2} placeholder="What should it present? (optional with a session)" aria-label="Topic" />
+          {source ? (
+            <div role="radiogroup" aria-label="Who presents" className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  ['self', 'The session itself', 'It keeps its context, and goes back to its work when the QA ends.'],
+                  ['new', 'A new presenter', 'A fresh session reads up on the work; it closes when the QA ends.'],
+                ] as const
+              ).map(([m, label, note]) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === m}
+                  onClick={() => setMode(m)}
+                  className={cn('rounded-lg border p-2.5 text-left text-sm', mode === m ? 'border-primary/50 bg-primary/10' : 'hover:bg-muted/50')}
+                >
+                  <span className="block font-medium">{label}</span>
+                  <span className="block text-xs text-muted-foreground">{note}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             {(['hr', 'en'] as const).map((l) => (
               <button
@@ -178,6 +203,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
     }
   }, 60_000)
   const presenter = presenterOf(allSessions(bearclaw), qa)
+  const ended = events.some((e) => e.type === 'ended')
 
   // The live stream: long polls, back to back.
   useEffect(() => {
@@ -313,7 +339,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
   }, [mic.state])
 
   const talk = () => {
-    if (micState.current !== 'idle') return
+    if (micState.current !== 'idle' || ended) return
     unlock()
     cutIn()
     holdStart.current = Date.now()
@@ -372,8 +398,17 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
   const doing = statusSince(events, cursor)
   const lastQuestion = events.findLast((e) => e.type === 'question')
   const slideNo = events.filter((e) => e.type === 'slide' && e.seq <= cursor).length
+  const end = () => {
+    audio.current?.pause()
+    setHeld(true)
+    api
+      .qaEnd(id)
+      .then((r) => toast.success(r.closes ? 'QA ended: the presenter is closing' : 'QA ended: the session went back to its work'))
+      .catch((err) => toast.error('Not ended', { description: (err as Error)?.message }))
+  }
   // Who has the floor, and the one line that says what happens next.
   const floor: Floor = (() => {
+    if (ended) return { who: 'ready', line: qa?.mode === 'self' ? 'The QA is over: the session went back to its work' : 'The QA is over: the presenter closes' }
     if (!qa || (!presenter && !next)) return { who: 'wait', line: qa ? 'Starting the presenter…' : 'Loading…' }
     if (presenter?.status === 'waiting') return { who: 'wait', line: `The presenter is stuck on a prompt in its terminal${presenter.waiting_for ? `: ${presenter.waiting_for}` : ''}` }
     if (mic.state === 'recording') return { who: 'you', line: `You're talking (${formatElapsed(tick - (mic.startedAt ?? tick))})` }
@@ -391,7 +426,11 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
     threadEnd.current?.scrollIntoView({ block: 'nearest' })
   }, [thread.length])
 
-  const mainButton = !started ? (
+  const mainButton = ended ? (
+    <Button asChild variant="outline" className="h-12 rounded-full px-5">
+      <Link href="/qa">All QA sessions</Link>
+    </Button>
+  ) : !started ? (
     <Button onClick={unlock} disabled={!presenter && !next} className="h-14 rounded-full px-6 text-base">
       <PlayIcon /> {resumable ? 'Resume' : 'Start'}
     </Button>
@@ -410,9 +449,14 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
           </Button>
           <h1 className="min-w-0 flex-1 truncate text-lg font-bold tracking-tight">{qa?.title ?? 'QA'}</h1>
           {presenter ? (
-            <Link href={sessionHref(presenter)} className="shrink-0 text-xs text-muted-foreground hover:text-foreground">
-              Open the presenter
+            <Link href={sessionHref(presenter)} className="shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground">
+              {qa?.mode === 'self' ? 'Open the session' : 'Open the presenter'}
             </Link>
+          ) : null}
+          {qa && !ended ? (
+            <Button variant="ghost" size="sm" onClick={end} className="shrink-0 text-muted-foreground">
+              End QA
+            </Button>
           ) : null}
         </div>
       </ScreenHeader>
@@ -433,7 +477,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
                 {mainButton}
                 <div className="min-w-0 flex-1">
                   <FloorLine floor={floor} />
-                  {listening ? (
+                  {listening && !ended ? (
                     <div className="mt-2 flex gap-2">
                       <Button size="sm" onClick={goOn}>
                         Go on
@@ -453,7 +497,7 @@ function QaLive({ id, layout }: { id: string; layout: 'screen' | 'pane' }) {
                     </p>
                   ) : null}
                 </div>
-                {started ? (
+                {started && !ended ? (
                   <Button
                     variant="ghost"
                     size="icon"

@@ -82,6 +82,7 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
         answering: null,
         asked: null,
         away: false,
+        ended: false,
         writes: Promise.resolve(),
       };
       rooms.set(id, r);
@@ -173,9 +174,10 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
 
     async say(id, text, answering) {
       const r = room(id);
+      if (r.ended) return { ended: true };
       const now = take(r) ?? stale(r, answering);
       if (now) return now;
-      if (r.hold) return until(r, () => take(r) ?? (r.hold ? undefined : { ok: true, note: 'the user let you go on' }), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
+      if (r.hold) return until(r, () => (r.ended ? { ended: true } : (take(r) ?? (r.hold ? undefined : { ok: true, note: 'the user let you go on' }))), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
       const words = String(text ?? '').trim();
       if (!words) return { ok: true };
       const sid = String(r.seq + 1);
@@ -187,7 +189,7 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
       // Back once everything said before this has been heard (or dropped).
       const before = r.order.slice(0, -1);
       const unheard = { ok: true, note: 'not heard yet (the user is away or has not started): call listen() and wait for them' };
-      const got = await until(r, () => take(r) ?? (r.hold ? undefined : before.every((b) => r.says.get(b)?.state !== 'queued') ? { ok: true } : undefined), holdMs, unheard);
+      const got = await until(r, () => (r.ended ? { ended: true } : (take(r) ?? (r.hold ? undefined : before.every((b) => r.says.get(b)?.state !== 'queued') ? { ok: true } : undefined))), holdMs, unheard);
       // Nobody listening: the listen() this sends it to is a pause, not the end of the talk.
       if (got === unheard) r.away = true;
       return got;
@@ -196,20 +198,24 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
     async show(id, body) {
       const { answering, ...slide } = body ?? {};
       const r = room(id);
+      if (r.ended) return { ended: true };
       const now = take(r) ?? stale(r, answering);
       if (now) return now;
-      if (r.hold) return until(r, () => take(r) ?? (r.hold ? undefined : { ok: true }), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
+      if (r.hold) return until(r, () => (r.ended ? { ended: true } : (take(r) ?? (r.hold ? undefined : { ok: true }))), holdMs, { ok: true, note: 'the user is still talking: call listen() now' });
       push(r, { type: 'slide', slide });
       return { ok: true };
     },
 
     async status(id, text) {
-      push(room(id), { type: 'status', text: String(text ?? '').slice(0, 200) });
+      const r = room(id);
+      if (r.ended) return { ended: true };
+      push(r, { type: 'status', text: String(text ?? '').slice(0, 200) });
       return { ok: true };
     },
 
     async listen(id) {
       const r = room(id);
+      if (r.ended) return { ended: true };
       // The answer is given: the talk goes on without the question's id.
       r.answering = null;
       r.asked = null;
@@ -224,6 +230,7 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
       return until(
         r,
         () => {
+          if (r.ended) return { ended: true };
           const q = take(r);
           if (q) return q;
           if (r.cont && !r.hold) {
@@ -281,6 +288,15 @@ export function createQaLive({ speaker, dir = null, log = () => {}, holdMs = HOL
       r.hold = false;
       r.cont = true;
       wake(r);
+      return { ok: true };
+    },
+
+    /** The user ended the QA session: every presenter call says so, and the presenter goes back to its work. */
+    end(id) {
+      const r = room(id);
+      r.ended = true;
+      r.hold = false;
+      push(r, { type: 'ended' });
       return { ok: true };
     },
 

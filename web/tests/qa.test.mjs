@@ -22,16 +22,17 @@ test('the brief: the source to learn, the tools to talk with, never ending the t
   const b = presenterBrief({ id: 'x', title: 'T', topic: '', source, lang: 'en' });
   assert.match(b, /bearclaw brief 7fba201d/);
   assert.match(b, /Speak English/);
-  assert.match(b, /never end your turn/);
+  assert.match(b, /do not end your turn while the QA runs/);
+  assert.match(b, /`end\(\)`: the user is done/);
   for (const tool of ['say(text)', 'show(slide)', 'status(text)', 'listen()']) assert.ok(b.includes(tool), tool);
   assert.match(b, /without `answering: <id>` is not said/);
 });
 
-test('create writes the record and the workspace, and starts the presenter there', async () => {
+test('create (a new presenter) writes the record and the workspace, and starts the presenter there', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bearclaw-qa-'));
   const spawned = [];
   const qa = createQa({ dir, now: () => 42, node: '/usr/bin/node', apiBase: 'http://127.0.0.1:7777/api', spawner: { spawn: async (o) => spawned.push(o) } });
-  const made = await qa.create({ source, topic: 'Subagenti', lang: 'en' });
+  const made = await qa.create({ source, topic: 'Subagenti', lang: 'en', mode: 'new' });
   const f = path.join(dir, made.id);
   assert.match(made.id, /^agent-orchestration-subagent-[0-9a-f]{4}$/);
   assert.ok(made.presenter.tmux.length <= 40);
@@ -162,4 +163,60 @@ test('a listen() after nobody heard the last sentence is a pause (away), not the
   assert.equal(next.events[0].away, undefined, 'only the first listen after it');
   q.proceed('a');
   await again;
+});
+
+test('self: a session given as the source presents its own work, unless a new presenter is asked for', async () => {
+  const withTmux = { ...source, tmux: 'work-3' };
+  assert.equal(validateQa({ source: withTmux }).mode, 'self');
+  assert.equal(validateQa({ source: withTmux, mode: 'new' }).mode, 'new');
+  assert.equal(validateQa({ topic: 'x' }).mode, 'new');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bearclaw-qa-self-'));
+  const spawned = [];
+  const qa = createQa({ dir, node: '/usr/bin/node', spawner: { spawn: async (o) => spawned.push(o) } });
+  const made = await qa.create({ source: withTmux, lang: 'en' });
+  assert.equal(made.mode, 'self');
+  assert.deepEqual(made.presenter, { tmux: 'work-3', session: source.session });
+  assert.deepEqual(spawned, [], 'nothing is started');
+  assert.deepEqual((await fs.readdir(path.join(dir, made.id))).sort(), ['qa.json'], 'no workspace');
+  assert.ok(made.brief.startsWith(`[bearclaw QA ${made.id}]`));
+  assert.match(made.brief, new RegExp(`/usr/bin/node \\S+/bin/qa\\.mjs ${made.id}`));
+  for (const call of ['Q say', 'Q show', 'Q status', 'Q listen', 'Q end', '--answering']) assert.ok(made.brief.includes(call), call);
+  assert.match(made.brief, /go back to what you were doing/);
+  assert.equal((await qa.get(made.id)).brief, undefined, 'the brief is not kept in the record');
+});
+
+test('end: every presenter call, and one already waiting, says the QA is over', async () => {
+  const q = live();
+  const waiting = q.listen('a');
+  q.end('a');
+  assert.deepEqual(await waiting, { ended: true });
+  assert.deepEqual(await q.say('a', 'More?'), { ended: true });
+  assert.deepEqual(await q.show('a', { title: 'x' }), { ended: true });
+  assert.deepEqual(await q.status('a', 'x'), { ended: true });
+  assert.equal((await q.events('a', 0)).events.at(-1).type, 'ended');
+});
+
+test('the qa command: posts its call and prints what the presenter should do', async () => {
+  const { createServer } = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const seen = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      seen.push([req.url, JSON.parse(body || '{}')]);
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(req.url.endsWith('/say') ? { interrupted: true, question: 'Why?', id: 'q1' } : { ok: true }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const run = (...a) => new Promise((resolve) => execFile(process.execPath, [new URL('../bin/qa.mjs', import.meta.url).pathname, ...a, '--base', base], (err, out, errOut) => resolve({ code: err?.code ?? 0, out, errOut })));
+  const said = await run('talk-1', 'say', 'Hello', 'there.', '--answering', 'q0');
+  assert.match(said.out, /interrupted you and asked: "Why\?".*--answering q1.*`Q listen`/s);
+  const shown = await run('talk-1', 'show', '{"title":"T"}');
+  assert.equal(shown.out.trim(), 'ok');
+  assert.equal((await run('talk-1', 'shout')).code, 2);
+  server.close();
+  assert.deepEqual(seen, [['/api/qa/talk-1/mcp/say', { text: 'Hello there.', answering: 'q0' }], ['/api/qa/talk-1/mcp/show', { title: 'T' }]]);
 });

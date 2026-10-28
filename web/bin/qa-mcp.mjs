@@ -6,6 +6,8 @@
 import process from 'node:process';
 import readline from 'node:readline';
 
+import { words } from '../lib/qa-words.mjs';
+
 const arg = (name) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : null;
@@ -63,6 +65,11 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'end',
+    description: 'The user is done (they said so: "that\'s all", "end the QA", "zatvori QA"): end the QA session. Say a one-line goodbye first.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'status',
     description: 'One short line on what you are doing right now, shown at once (e.g. "Reading delegate-task-tool.ts"). Use it before anything that takes more than a few seconds.',
     inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
@@ -71,21 +78,6 @@ const TOOLS = [
 
 function reply(text) {
   return { content: [{ type: 'text', text }] };
-}
-
-/** A tool's answer, worded for the presenter. */
-function words(name, r) {
-  if (r?.interrupted) {
-    return `The user interrupted you and asked: "${r.question}". Everything you had decided to say before this is dropped. Answer it now, passing answering: "${r.id}" in every say and show until you call listen(): acknowledge it in one short spoken sentence (say), look at the real code first if the question needs it (status while you do), show what you found, then say the answer, ask whether to go on, and call listen().`;
-  }
-  if (r?.dropped) {
-    return `Not said: the user interrupted you and asked: "${r.question}". Answer that first, passing answering: "${r.id}" in say and show, then call listen().`;
-  }
-  if (name === 'listen') {
-    if (r?.continue) return 'The user wants you to go on: continue the talk where it fits, with show and say.';
-    return 'Nothing yet. Call listen() again.';
-  }
-  return r?.note ? `ok (${r.note})` : 'ok';
 }
 
 async function call(name, args) {

@@ -38,7 +38,7 @@ export const API_VERSION = 1;
 // Videos (lib/videos.mjs): the list, one video, its narration, its player page. Always this server.
 // QA sessions (lib/qa.mjs, lib/qa-live.mjs): list / create, one record, its live event stream and
 // voice, the screen's interrupt / ask / continue, and the presenter's MCP calls. Always this server.
-const QA_ROUTE = /^\/api\/qa(?:\/([^/]+)(?:\/(events|played|interrupt|ask|continue|audio\/[0-9]+|mcp\/(?:say|show|listen|status)))?)?$/;
+const QA_ROUTE = /^\/api\/qa(?:\/([^/]+)(?:\/(events|played|interrupt|ask|continue|end|audio\/[0-9]+|mcp\/(?:say|show|listen|status|end)))?)?$/;
 const VIDEOS_ROUTE = /^\/api\/videos(?:\/([^/]+)(?:\/(audio|player))?)?$/;
 const SESSION_ROUTE = /^\/api\/hosts\/([^/]+)\/sessions\/([^/]+)\/(peek|messages|send|keys|answer|kill|rename)$/;
 const POST_ACTIONS = new Set(['send', 'keys', 'answer', 'kill', 'rename']);
@@ -1166,7 +1166,17 @@ export function createApi({
   async function handleQa(req, url, id, part) {
     if (!qa) throw new HttpError('QA sessions are not available on this server', 501);
     if (!id) {
-      if (req.method === 'POST') return { status: 200, body: await qa.create(await readJsonBody(req)) };
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const made = await qa.create(body);
+        // The source session presents its own work: hand it the brief (unless it asked for it itself).
+        if (made.mode === 'self' && body.send !== false) {
+          const session = await findQaPresenter(made);
+          if (!session) throw new HttpError(`the session to present (${made.source.title || made.source.session}) is not running here`, 404);
+          await backend.send(session, made.brief);
+        }
+        return { status: 200, body: made };
+      }
       if (req.method !== 'GET') throw new HttpError('method not allowed', 405);
       return { status: 200, body: { sessions: await qa.list() } };
     }
@@ -1215,9 +1225,36 @@ export function createApi({
         return { status: 200, body: await qaLive.status(id, body.text) };
       case 'mcp/listen':
         return { status: 200, body: await qaLive.listen(id) };
+      case 'end':
+      case 'mcp/end':
+        return { status: 200, body: await finishQa(record, id) };
       default:
         throw new HttpError('not found', 404);
     }
+  }
+
+  /** The QA session's presenter: the source session (self), or the presenter started for it. */
+  async function findQaPresenter(record) {
+    const host = await bearclaw.localHost();
+    if (!host.ok) return null;
+    return host.sessions.find((s) => (record.presenter.session && s.session_id === record.presenter.session) || (record.presenter.tmux && s.tmux_session === record.presenter.tmux)) ?? null;
+  }
+
+  /**
+   * End a QA session: every presenter call says it is over. A presenter started for it is closed
+   * (after a moment, so its goodbye is heard); a session presenting its own work goes back to it.
+   */
+  async function finishQa(record, id, closeAfterMs = 3000) {
+    const r = qaLive.end(id);
+    if (record.mode !== 'self' && killer) {
+      (async () => {
+        await sleep(closeAfterMs);
+        const presenter = await findQaPresenter(record);
+        if (presenter) await killer.kill(presenter);
+        refreshBearclaw();
+      })().catch((err) => logError?.(`qa ${id}: closing the presenter: ${err?.message ?? err}`));
+    }
+    return { ...r, ended: true, closes: record.mode !== 'self' };
   }
 
   /**
@@ -1227,8 +1264,7 @@ export function createApi({
   async function handOver(record, id, waitMs = 4000) {
     await sleep(waitMs);
     if (!qaLive.pendingQuestion(id)) return;
-    const host = await bearclaw.localHost();
-    const presenter = host.ok ? host.sessions.find((s) => s.tmux_session === record.presenter.tmux) : null;
+    const presenter = await findQaPresenter(record);
     if (!presenter || presenter.status === 'busy') return;
     const q = qaLive.takeQuestion(id);
     if (q) await backend.send(presenter, `The user asked: "${q}". Answer it with your bearclaw-qa tools (say / show), then call listen().`);

@@ -266,10 +266,12 @@ export interface QaRecord {
   title: string
   topic: string
   /** The session whose work is presented. */
-  source: { host: string; session: string; title: string; cwd: string | null } | null
+  source: { host: string; session: string; title: string; cwd: string | null; tmux?: string | null } | null
   lang: 'hr' | 'en'
-  /** The presenter's tmux session: how the screen finds it in the bearclaw. */
-  presenter: { tmux: string }
+  /** self: the source session presents its own work (it keeps its context); new: a presenter started for it. */
+  mode?: 'self' | 'new'
+  /** Who presents: the source session (self), or the tmux session started for it. */
+  presenter: { tmux: string | null; session?: string }
   createdAt: number
   model?: string
 }

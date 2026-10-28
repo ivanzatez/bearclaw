@@ -74,7 +74,7 @@ export function toSlide(raw: unknown): QaSlide | null {
 export interface QaEvent {
   seq: number
   at: number
-  type: 'say' | 'slide' | 'status' | 'listening' | 'interrupt' | 'question'
+  type: 'say' | 'slide' | 'status' | 'listening' | 'interrupt' | 'question' | 'ended'
   sid?: string
   text?: string
   slide?: unknown

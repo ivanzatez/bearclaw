@@ -558,5 +558,12 @@ saved in the QA folder (`events.jsonl`, and `state.json` with how far the screen
 the page or restarting the server picks up where you left off; a sentence's voice is made again on
 demand. A question comes with an id, and until the presenter calls `listen()` a `say` or `show` without
 `answering: <id>` is dropped (the rest of a batch it decided before it saw the question). The presenter
-may change files when the user asks it to. The
+may change files when the user asks it to.
+
+Who presents (`mode`): by default the source session itself (`self`), which keeps its context. It gets
+the brief (`lib/qa.mjs` selfBrief) as a message and talks through `bin/qa.mjs`, the same calls as a
+command (`node qa.mjs <id> say|show|status|listen|end`), since it was not started with the MCP server.
+`mode: "new"` starts a presenter of its own instead. When the user is done (End QA, or they say so and
+the presenter calls `end`), every call answers that the QA is over: a session presenting itself goes
+back to its work; a presenter started for it is closed a few seconds later. The
 dashboard's QA tab lists QA sessions and opens one in the browser.
