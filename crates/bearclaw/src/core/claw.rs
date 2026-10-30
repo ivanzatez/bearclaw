@@ -72,7 +72,8 @@ tab works too. On any tab the **⟳ refresh** button (top right) or `r` reloads 
   `t` opens the linked Productive task, `R` starts a code review session on the PR in the
   background (the card then links it; `g` or a click on that link opens it), `m` opens a menu of these actions, `D` shows/hides drafts,
   `A` shows/hides "waiting on author".
-- **Tasks** — the user's open Productive tasks; Enter opens one in the browser, `g` groups by status/project.
+- **Tasks** — the user's open Productive tasks as a kanban like PRs: a lane per status (`g` makes them
+  projects), a card per task, red when overdue. ←/→ lane, ↑/↓ card, Enter opens the task in the browser.
 - **Todo / Memory / Notepad** — the work list, the shared brain notes (Memory), and the user's own notes;
   `n` adds, Enter/`e` opens in the built-in editor (Ctrl+S saves, Esc saves and closes).
 - **QA** — QA sessions: a new session presents someone's work to the user by voice, slide by slide,

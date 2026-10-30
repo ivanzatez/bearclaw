@@ -1,5 +1,7 @@
-//! The Tasks tab: your open Productive tasks.
+//! The Tasks tab: your open Productive tasks as a kanban, like the PRs tab — a lane per status
+//! in the board's order (or per project, `g`), a card per task.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::NaiveDate;
@@ -8,22 +10,32 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 
 use super::loader::Loader;
+use super::pager::wrap;
 use super::{Outcome, View, common_key};
-use crate::cli::render::{column, fit};
+use crate::cli::render::{ago, fit};
 use crate::core::productive::{self, Grouping, Task};
 use crate::core::tools::open_url;
 
 const TTL: Duration = Duration::from_secs(120);
+/// The narrowest a lane gets before lanes page instead.
+const LANE_MIN: u16 = 26;
+/// Rows one card takes: border, two title lines, `#N` and project, due date and age, border.
+const CARD_H: u16 = 6;
 
 pub struct TasksView {
     pub(crate) load: Loader<Vec<Task>>,
     grouping: Grouping,
-    /// Position in [`TasksView::order`] — the tasks as listed, group by group.
-    sel: usize,
-    list: ListState,
+    /// The selected lane (index into [`TasksView::lanes`]).
+    lane: usize,
+    /// The selected card per lane, by the lane's name — survives refreshes and lane hops.
+    card: HashMap<String, usize>,
+    /// The leftmost lane on screen when they don't all fit.
+    first_lane: usize,
+    /// Where each card was last drawn, with its index into the tasks — for clicks.
+    hits: Vec<(Rect, usize)>,
     /// How a task's link opens — swapped out in tests, which must not launch a browser.
     pub(crate) opener: fn(&str) -> Result<(), String>,
 }
@@ -34,15 +46,16 @@ impl Default for TasksView {
     }
 }
 
-/// `02.01.` and how it reads against today: overdue red, due today yellow.
+/// `02.01.` and how it reads against today (the web app's rule): overdue red, due within
+/// three days yellow.
 fn due_cell(due: Option<&str>, today: NaiveDate) -> (String, Color) {
     let Some(d) = due.and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()) else {
         return (String::new(), Color::DarkGray);
     };
-    let color = match d.cmp(&today) {
-        std::cmp::Ordering::Less => Color::Red,
-        std::cmp::Ordering::Equal => Color::Yellow,
-        std::cmp::Ordering::Greater => Color::Gray,
+    let color = match (d - today).num_days() {
+        ..0 => Color::Red,
+        0..=3 => Color::Yellow,
+        _ => Color::Gray,
     };
     (d.format("%d.%m.").to_string(), color)
 }
@@ -52,8 +65,10 @@ impl TasksView {
         TasksView {
             load: Loader::new(),
             grouping: Grouping::Status,
-            sel: 0,
-            list: ListState::default(),
+            lane: 0,
+            card: HashMap::new(),
+            first_lane: 0,
+            hits: Vec::new(),
             opener: open_url,
         }
     }
@@ -67,53 +82,48 @@ impl TasksView {
         self.load.data.as_deref().unwrap_or(&[])
     }
 
-    fn groups(&self) -> Vec<(String, Vec<usize>)> {
+    /// The lanes: a name and the tasks in it, in the board's order (or by project).
+    fn lanes(&self) -> Vec<(String, Vec<usize>)> {
         productive::group(self.tasks(), self.grouping)
-    }
-
-    /// Task indices in the order they are listed: group after group.
-    fn order(&self) -> Vec<usize> {
-        self.groups().into_iter().flat_map(|(_, idx)| idx).collect()
+            .into_iter()
+            .map(|(name, idx)| (if name.is_empty() { "—".into() } else { name }, idx))
+            .collect()
     }
 
     pub fn selected_task(&self) -> Option<&Task> {
-        self.order().get(self.sel).map(|&i| &self.tasks()[i])
+        let lanes = self.lanes();
+        let (name, idx) = lanes.get(self.lane.min(lanes.len().saturating_sub(1)))?;
+        let at = self
+            .card
+            .get(name)
+            .copied()
+            .unwrap_or(0)
+            .min(idx.len().checked_sub(1)?);
+        Some(&self.tasks()[idx[at]])
     }
 
-    /// The column the grouping already says is left out of the row.
-    fn row(t: &Task, width: usize, today: NaiveDate, grouping: Grouping) -> Line<'static> {
-        let num = format!(" {} ", column(&format!("#{}", t.number), 6));
-        let (due, due_color) = due_cell(t.due_date.as_deref(), today);
-        let due = format!(" {} ", column(&due, 6));
-        // Drop the side columns before the title gets unreadable.
-        let (project_w, status_w) = match width {
-            w if w >= 90 => (20, 14),
-            w if w >= 64 => (0, 14),
-            _ => (0, 0),
-        };
-        let (project_w, status_w) = match grouping {
-            Grouping::Status => (project_w.max(status_w).min(20), 0),
-            Grouping::Project => (0, status_w),
-        };
-        let title_w = width.saturating_sub(6 + 2 + 6 + 2 + project_w + status_w + 2);
-        let mut spans = vec![
-            Span::styled(num, Style::default().fg(Color::Cyan)),
-            Span::raw(column(&t.title, title_w)),
-        ];
-        if project_w > 0 {
-            spans.push(Span::styled(
-                format!(" {}", column(&t.project, project_w - 1)),
-                Style::default().fg(Color::Gray),
-            ));
+    /// Select the card of `tasks()[i]`.
+    fn select(&mut self, i: usize) {
+        for (n, (name, idx)) in self.lanes().into_iter().enumerate() {
+            if let Some(at) = idx.iter().position(|&x| x == i) {
+                self.lane = n;
+                self.card.insert(name, at);
+                return;
+            }
         }
-        if status_w > 0 {
-            spans.push(Span::styled(
-                format!(" {}", column(&t.status, status_w - 1)),
-                Style::default().fg(Color::Magenta),
-            ));
-        }
-        spans.push(Span::styled(due, Style::default().fg(due_color)));
-        Line::from(spans)
+    }
+
+    fn step_card(&mut self, down: bool) {
+        let lanes = self.lanes();
+        let Some((name, idx)) = lanes.get(self.lane) else {
+            return;
+        };
+        let at = self.card.entry(name.clone()).or_insert(0);
+        *at = if down {
+            (*at + 1).min(idx.len().saturating_sub(1))
+        } else {
+            at.saturating_sub(1)
+        };
     }
 
     /// The task in Productive, in the browser.
@@ -122,6 +132,148 @@ impl TasksView {
             Some(Err(e)) => Outcome::Log(e),
             _ => Outcome::None,
         }
+    }
+
+    /// A card: the title, `#N` with what the lane doesn't say (the project by status, the status
+    /// by project), the due date and how long ago it changed. The border is the due date's colour.
+    fn card(
+        t: &Task,
+        selected: bool,
+        width: u16,
+        today: NaiveDate,
+        grouping: Grouping,
+    ) -> (Vec<Line<'static>>, Style) {
+        let w = width.saturating_sub(2) as usize;
+        let mut title = wrap(&t.title, w);
+        if title.len() > 2 {
+            title[1] = fit(&format!("{} …", title[1]), w);
+            title.truncate(2);
+        }
+        let bold = if selected {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
+        let mut lines: Vec<Line> = title
+            .into_iter()
+            .map(|l| Line::styled(l, Style::default().add_modifier(bold)))
+            .collect();
+        while lines.len() < 2 {
+            lines.push(Line::default());
+        }
+        let (other, other_color) = match grouping {
+            Grouping::Status => (&t.project, Color::Gray),
+            Grouping::Project => (&t.status, Color::Magenta),
+        };
+        let num = format!("#{} ", t.number);
+        lines.push(Line::from(vec![
+            Span::styled(num.clone(), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                fit(other, w.saturating_sub(num.chars().count())),
+                Style::default().fg(other_color),
+            ),
+        ]));
+        let (due, due_color) = due_cell(t.due_date.as_deref(), today);
+        let due = if due.is_empty() {
+            "no due date".to_string()
+        } else {
+            format!("due {due}")
+        };
+        let updated = chrono::DateTime::parse_from_rfc3339(&t.updated_at)
+            .map(|d| format!("  {} ago", ago(Some(d.timestamp_millis()))))
+            .unwrap_or_default();
+        lines.push(Line::from(vec![
+            Span::styled(due, Style::default().fg(due_color)),
+            Span::styled(updated, Style::default().fg(Color::DarkGray)),
+        ]));
+        let border = Style::default().fg(match due_color {
+            Color::Red | Color::Yellow => due_color,
+            _ => Color::DarkGray,
+        });
+        let border = if selected {
+            border.add_modifier(Modifier::BOLD)
+        } else {
+            border
+        };
+        (lines, border)
+    }
+
+    fn draw_lane(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        (name, idx): (&str, &[usize]),
+        selected_lane: bool,
+        (more_left, more_right): (bool, bool),
+    ) -> Vec<(Rect, usize)> {
+        let left = if more_left { "‹ " } else { "" };
+        let right = if more_right { " ›" } else { "" };
+        let border = if selected_lane {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border))
+            .title(fit(
+                &format!("{left} {name} ({}) {right}", idx.len()),
+                area.width.saturating_sub(2) as usize,
+            ));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let mut hits = Vec::new();
+        if inner.height == 0 || inner.width == 0 || idx.is_empty() {
+            return hits;
+        }
+        let at = self.card.get(name).copied().unwrap_or(0).min(idx.len() - 1);
+        // Leave a row for "+N more ↓" when the cards don't all fit.
+        let fits = (inner.height / CARD_H).max(1) as usize;
+        let shown = if idx.len() > fits {
+            ((inner.height.saturating_sub(1)) / CARD_H).max(1) as usize
+        } else {
+            fits
+        };
+        let offset = (at + 1).saturating_sub(shown);
+        let today = chrono::Local::now().date_naive();
+        let mut y = inner.y;
+        for (n, &i) in idx.iter().enumerate().skip(offset).take(shown) {
+            let h = CARD_H.min(inner.y + inner.height - y);
+            if h < 3 {
+                break;
+            }
+            let selected = selected_lane && n == at;
+            let (lines, style) = Self::card(
+                &self.tasks()[i],
+                selected,
+                inner.width,
+                today,
+                self.grouping,
+            );
+            let card = Block::default()
+                .borders(Borders::ALL)
+                .border_type(if selected {
+                    BorderType::Thick
+                } else {
+                    BorderType::Rounded
+                })
+                .border_style(style);
+            let rect = Rect::new(inner.x, y, inner.width, h);
+            f.render_widget(Paragraph::new(lines).block(card), rect);
+            hits.push((rect, i));
+            y += h;
+        }
+        let below = idx.len().saturating_sub(offset + shown);
+        if below > 0 && y < inner.y + inner.height {
+            f.render_widget(
+                Paragraph::new(Line::styled(
+                    format!("+{below} more ↓"),
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+            );
+        }
+        hits
     }
 }
 
@@ -138,8 +290,19 @@ impl View for TasksView {
 
     fn tick(&mut self) {
         if self.load.poll() {
-            self.sel = self.sel.min(self.tasks().len().saturating_sub(1));
+            self.lane = self.lane.min(self.lanes().len().saturating_sub(1));
         }
+    }
+
+    fn click(&mut self, col: u16, row: u16) -> Outcome {
+        let hit =
+            self.hits.iter().copied().find(|(r, _)| {
+                col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+            });
+        if let Some((_, i)) = hit {
+            self.select(i);
+        }
+        Outcome::None
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -157,11 +320,14 @@ impl View for TasksView {
             .border_style(Style::default().fg(Color::DarkGray))
             .title(fit(&title, area.width.saturating_sub(2) as usize))
             .title_bottom(Line::styled(
-                " ⏎ open in Productive · g group by status/project · r refresh · esc back ",
+                " ←/→ lane · ↑/↓ card · ⏎ open in Productive · g group by status/project · r refresh · esc back ",
                 Style::default().fg(Color::DarkGray),
             ));
         let inner = block.inner(area);
         f.render_widget(block, area);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
         if self.load.data.is_none() {
             let msg = match (&self.load.error, self.load.loading) {
                 (Some(e), _) => e.clone(),
@@ -174,44 +340,44 @@ impl View for TasksView {
             );
             return;
         }
-        if self.tasks().is_empty() {
+        let lanes = self.lanes();
+        if lanes.is_empty() {
             f.render_widget(Paragraph::new(" no open tasks"), inner);
             return;
         }
-        let today = chrono::Local::now().date_naive();
-        let width = inner.width as usize;
-        let header = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let mut items: Vec<ListItem> = Vec::new();
-        let mut selected_row = 0;
-        let mut listed = 0;
-        for (name, idx) in self.groups() {
-            let name = if name.is_empty() {
-                "—".to_string()
-            } else {
-                name
-            };
-            items.push(ListItem::new(Line::styled(
-                format!(" {name} · {}", idx.len()),
-                header,
-            )));
-            for i in idx {
-                if listed == self.sel {
-                    selected_row = items.len();
-                }
-                listed += 1;
-                items.push(ListItem::new(Self::row(
-                    &self.tasks()[i],
-                    width,
-                    today,
-                    self.grouping,
-                )));
-            }
+        let visible = ((inner.width / LANE_MIN).max(1) as usize).min(lanes.len());
+        self.lane = self.lane.min(lanes.len() - 1);
+        if self.lane < self.first_lane {
+            self.first_lane = self.lane;
         }
-        self.list.select(Some(selected_row));
-        let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
-        f.render_stateful_widget(list, inner, &mut self.list);
+        if self.lane >= self.first_lane + visible {
+            self.first_lane = self.lane + 1 - visible;
+        }
+        self.first_lane = self.first_lane.min(lanes.len() - visible);
+        let lane_w = inner.width / visible as u16;
+        let mut hits = Vec::new();
+        for (n, (name, idx)) in lanes.iter().enumerate().skip(self.first_lane).take(visible) {
+            let slot = (n - self.first_lane) as u16;
+            let x = inner.x + slot * lane_w;
+            // The last lane takes the rounding remainder.
+            let w = if slot as usize == visible - 1 {
+                inner.width - slot * lane_w
+            } else {
+                lane_w
+            };
+            let edges = (
+                slot == 0 && self.first_lane > 0,
+                slot as usize == visible - 1 && self.first_lane + visible < lanes.len(),
+            );
+            hits.extend(self.draw_lane(
+                f,
+                Rect::new(x, inner.y, w, inner.height),
+                (name, idx),
+                n == self.lane,
+                edges,
+            ));
+        }
+        self.hits = hits;
     }
 
     fn key(&mut self, k: KeyEvent) -> Outcome {
@@ -219,17 +385,22 @@ impl View for TasksView {
             return o;
         }
         match k.code {
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.sel = (self.sel + 1).min(self.tasks().len().saturating_sub(1));
+            KeyCode::Right | KeyCode::Char('l') => {
+                let n = self.lanes().len();
+                self.lane = (self.lane + 1).min(n.saturating_sub(1));
             }
-            KeyCode::Up | KeyCode::Char('k') => self.sel = self.sel.saturating_sub(1),
+            KeyCode::Left | KeyCode::Char('h') => self.lane = self.lane.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.step_card(true),
+            KeyCode::Up | KeyCode::Char('k') => self.step_card(false),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('g') => {
                 self.grouping = match self.grouping {
                     Grouping::Status => Grouping::Project,
                     Grouping::Project => Grouping::Status,
                 };
-                self.sel = 0;
+                self.lane = 0;
+                self.first_lane = 0;
+                self.card.clear();
             }
             KeyCode::Enter | KeyCode::Char('o') => return self.open(),
             _ => {}
@@ -245,14 +416,39 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    fn screen(v: &mut TasksView, w: u16, h: u16) -> String {
+    fn draw(v: &mut TasksView, w: u16, h: u16) -> ratatui::buffer::Buffer {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
         t.draw(|f| v.draw(f, f.area())).unwrap();
-        let buf = t.backend().buffer().clone();
+        t.backend().buffer().clone()
+    }
+
+    fn screen(v: &mut TasksView, w: u16, h: u16) -> String {
+        let buf = draw(v, w, h);
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn key(v: &mut TasksView, c: KeyCode) -> Outcome {
+        v.key(KeyEvent::new(c, KeyModifiers::NONE))
+    }
+
+    fn task(n: &str, status: &str, rank: (u8, i64), project: &str) -> Task {
+        Task {
+            id: n.into(),
+            number: n.into(),
+            title: format!("task {n}"),
+            status: status.into(),
+            status_rank: rank,
+            project: project.into(),
+            url: format!("https://app.example/tasks/{n}"),
+            ..Default::default()
+        }
+    }
+
+    fn number(v: &TasksView) -> Option<String> {
+        v.selected_task().map(|t| t.number.clone())
     }
 
     #[test]
@@ -260,46 +456,103 @@ mod tests {
         let mut v = TasksView::new();
         v.load.error = Some("set productive.organizationId: bearclaw config set".into());
         assert!(screen(&mut v, 80, 10).contains("set productive.organizationId"));
-        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(v.key(j), Outcome::None);
-        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        assert_eq!(v.key(enter), Outcome::None);
+        assert_eq!(key(&mut v, KeyCode::Char('j')), Outcome::None);
+        assert_eq!(key(&mut v, KeyCode::Enter), Outcome::None);
     }
 
     #[test]
-    fn tasks_are_grouped_under_their_status() {
-        let t = |n: &str, status: &str, rank: (u8, i64), project: &str| Task {
-            id: n.into(),
-            number: n.into(),
-            title: format!("task {n}"),
-            status: status.into(),
-            status_rank: rank,
-            project: project.into(),
-            ..Default::default()
+    fn a_lane_per_status_in_board_order_and_g_makes_them_projects() {
+        let mut v = TasksView::new();
+        v.load.data = Some(vec![
+            task("1", "Working", (2, 4), "Web"),
+            task("2", "Triage", (1, 1), "Api"),
+            task("3", "Working", (2, 4), "Api"),
+        ]);
+        let s = screen(&mut v, 100, 20);
+        let lanes = s.lines().find(|l| l.contains("Triage (1)")).unwrap_or("");
+        assert!(
+            lanes.contains("Working (2)")
+                && lanes.find("Triage (1)").unwrap() < lanes.find("Working (2)").unwrap(),
+            "{s}"
+        );
+        assert!(
+            s.contains("#2") && s.contains("task 2") && s.contains("Api"),
+            "{s}"
+        );
+        assert_eq!(number(&v).as_deref(), Some("2"));
+        key(&mut v, KeyCode::Right);
+        assert_eq!(number(&v).as_deref(), Some("1"));
+        key(&mut v, KeyCode::Down);
+        assert_eq!(number(&v).as_deref(), Some("3"));
+        key(&mut v, KeyCode::Down);
+        assert_eq!(number(&v).as_deref(), Some("3"));
+        key(&mut v, KeyCode::Left);
+        assert_eq!(number(&v).as_deref(), Some("2"));
+        // Back on the lane, its card is where it was left.
+        key(&mut v, KeyCode::Char('l'));
+        assert_eq!(number(&v).as_deref(), Some("3"));
+
+        key(&mut v, KeyCode::Char('g'));
+        let p = screen(&mut v, 100, 20);
+        assert!(p.contains("Api (2)") && p.contains("Web (1)"), "{p}");
+        // A card names what its lane doesn't: the status, by project.
+        assert!(p.contains("Triage"), "{p}");
+    }
+
+    #[test]
+    fn narrow_screens_page_the_lanes() {
+        let mut v = TasksView::new();
+        v.load.data = Some(vec![
+            task("1", "Triage", (1, 1), "Web"),
+            task("2", "Working", (2, 1), "Web"),
+            task("3", "Review", (2, 2), "Web"),
+        ]);
+        let s = screen(&mut v, 60, 14);
+        assert!(
+            s.contains("Triage (1)") && s.contains("›") && !s.contains("Review (1)"),
+            "{s}"
+        );
+        key(&mut v, KeyCode::Right);
+        key(&mut v, KeyCode::Right);
+        let s = screen(&mut v, 60, 14);
+        assert!(
+            s.contains("Review (1)") && s.contains("‹") && !s.contains("Triage (1)"),
+            "{s}"
+        );
+    }
+
+    #[test]
+    fn a_card_is_red_when_overdue_and_yellow_when_due_within_three_days() {
+        let today = chrono::Local::now().date_naive();
+        let day = |d: i64| {
+            Some(
+                (today + chrono::Duration::days(d))
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            )
         };
         let mut v = TasksView::new();
         v.load.data = Some(vec![
-            t("1", "Working", (2, 4), "Web"),
-            t("2", "Triage", (1, 1), "Api"),
-            t("3", "Working", (2, 4), "Api"),
+            Task {
+                due_date: day(-1),
+                ..task("1", "Triage", (1, 1), "Web")
+            },
+            Task {
+                due_date: day(2),
+                ..task("2", "Working", (2, 1), "Web")
+            },
+            Task {
+                due_date: day(9),
+                ..task("3", "Review", (2, 2), "Web")
+            },
         ]);
-        let s = screen(&mut v, 100, 12);
-        assert!(s.contains("Triage · 1") && s.contains("Working · 2"), "{s}");
-        assert!(
-            s.find("Triage ·").unwrap() < s.find("Working ·").unwrap(),
-            "{s}"
-        );
-        let n = |v: &TasksView| v.selected_task().map(|t| t.number.clone());
-        assert_eq!(n(&v).as_deref(), Some("2"));
-        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        v.key(j);
-        assert_eq!(n(&v).as_deref(), Some("1"));
-        v.key(j);
-        v.key(j);
-        assert_eq!(n(&v).as_deref(), Some("3"));
-        v.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
-        let p = screen(&mut v, 100, 12);
-        assert!(p.contains("Api · 2") && p.contains("Web · 1"), "{p}");
+        let buf = draw(&mut v, 120, 14);
+        // Row 2 is where the cards' top edges are, one per lane.
+        let corners: Vec<Color> = (0..120)
+            .filter(|&x| ["╭", "┏"].contains(&buf[(x, 2)].symbol()))
+            .map(|x| buf[(x, 2)].fg)
+            .collect();
+        assert_eq!(corners, [Color::Red, Color::Yellow, Color::DarkGray]);
     }
 
     static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -323,27 +576,40 @@ mod tests {
             url: "https://app.example/tasks/7".into(),
             ..Default::default()
         }]);
-        let list = screen(&mut v, 100, 10);
+        let board = screen(&mut v, 100, 10);
         assert!(
-            list.contains("#12") && list.contains("Fix login") && list.contains("Website"),
-            "{list}"
+            board.contains("#12") && board.contains("Fix login") && board.contains("Website"),
+            "{board}"
         );
-        assert!(list.contains("02.01."), "{list}");
-        assert_eq!(
-            v.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            Outcome::None
-        );
+        assert!(board.contains("02.01."), "{board}");
+        assert_eq!(key(&mut v, KeyCode::Enter), Outcome::None);
         assert!(
             OPENED
                 .lock()
                 .unwrap()
                 .contains(&"https://app.example/tasks/7".to_string())
         );
-        // No summary page: the list stays, and Esc leaves the tab.
+        // No summary page: the board stays, and Esc leaves the tab.
         assert!(screen(&mut v, 100, 10).contains("#12"));
-        assert_eq!(
-            v.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            Outcome::Home
-        );
+        assert_eq!(key(&mut v, KeyCode::Esc), Outcome::Home);
+    }
+
+    #[test]
+    fn a_click_selects_the_card_under_it() {
+        let mut v = TasksView::new();
+        v.load.data = Some(vec![
+            task("1", "Triage", (1, 1), "Web"),
+            task("2", "Working", (2, 1), "Web"),
+            task("3", "Working", (2, 1), "Api"),
+        ]);
+        let s = screen(&mut v, 100, 20);
+        let (row, line) = s
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains("task 3"))
+            .unwrap();
+        let col = line[..line.find("task 3").unwrap()].chars().count() as u16;
+        assert_eq!(v.click(col, row as u16), Outcome::None);
+        assert_eq!(number(&v).as_deref(), Some("3"));
     }
 }
