@@ -2,6 +2,7 @@
 
 pub mod claw_card;
 pub mod claw_sprite;
+pub mod colors;
 pub mod dash;
 pub mod notify;
 pub mod tabs;

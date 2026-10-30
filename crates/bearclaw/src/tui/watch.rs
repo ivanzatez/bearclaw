@@ -36,7 +36,6 @@ use crate::core::backend;
 use crate::core::discovery::{Session, claude_home, discover, enrich_iterm_tabs, is_fixture};
 use crate::core::naming::{GenOpts, NameCache, NameJob, NameMsg, NamePool, NameSource, Purpose};
 use crate::error::{Error, Result};
-use crate::tui::claw_card;
 use crate::tui::dash::keys::{self, Action, RenameAction};
 use crate::tui::dash::layout::{self as dashlayout, Density, Plan};
 use crate::tui::dash::rows::{self, BearclawCtx, session_item};
@@ -48,6 +47,7 @@ use crate::tui::tabs::{self, Outcome, Tab, Tabs};
 use crate::tui::term::embed::Embedded;
 use crate::tui::term::keys as term_keys;
 use crate::tui::term::{clip, select};
+use crate::tui::{claw_card, colors};
 
 const EVENT_CAP: usize = 20;
 
@@ -826,6 +826,7 @@ fn run_tui(o: WatchOpts) -> Result<()> {
     // A paste arrives whole, so a multi-line one can't press Enter in a session line by line.
     execute!(io::stdout(), EnableBracketedPaste).map_err(Error::Io)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout())).map_err(Error::Io)?;
+    let truecolor = colors::truecolor();
 
     let mut state = load_state();
     let mut log: Vec<Ev> = Vec::new();
@@ -1027,7 +1028,10 @@ fn run_tui(o: WatchOpts) -> Result<()> {
                     renaming.as_ref(),
                     &o,
                     &mut dash,
-                )
+                );
+                if !truecolor {
+                    colors::downsample(f.buffer_mut());
+                }
             })
             .map_err(Error::Io)?;
 
