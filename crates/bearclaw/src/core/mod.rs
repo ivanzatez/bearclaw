@@ -14,6 +14,7 @@ pub mod hosts;
 pub mod jobs;
 pub mod naming;
 pub mod notes;
+pub mod procs;
 pub mod productive;
 pub mod prs;
 pub mod qa;

@@ -170,11 +170,12 @@ mod tests {
     #[test]
     fn a_failed_save_can_still_be_left() {
         // A read-only file opens fine and refuses every save.
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("ro.md");
         std::fs::write(&p, "keep\n").unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let mut ro = std::fs::metadata(&p).unwrap().permissions();
+        ro.set_readonly(true);
+        std::fs::set_permissions(&p, ro).unwrap();
         let mut e = Editor::open(p.clone()).unwrap();
         e.key(k(KeyCode::Char('x')));
         assert_eq!(e.key(k(KeyCode::Esc)), EditorOutcome::None);

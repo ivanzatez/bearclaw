@@ -268,7 +268,7 @@ pub(crate) fn output_with_timeout(mut c: Command, timeout: Duration) -> std::io:
     match rx.recv_timeout(timeout) {
         Ok(r) => r,
         Err(_) => {
-            let _ = Command::new("kill").arg(pid.to_string()).status();
+            crate::core::procs::kill(pid as i64);
             Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("timed out after {}s", timeout.as_secs()),
@@ -568,7 +568,11 @@ pub fn state_path() -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(tools::expand_tilde(&p.to_string_lossy())))
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/state"));
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".local/state")
+        });
     base.join("bearclaw").join("repos.json")
 }
 
@@ -696,7 +700,7 @@ mod tests {
         assert_eq!(s.every, 12 * 3600);
         assert_eq!(s.overrides.len(), 2);
         assert_eq!(s.problems.len(), 2, "{:?}", s.problems);
-        let home = dirs::home_dir().unwrap();
+        let home = crate::core::tools::home_dir().unwrap();
         assert_eq!(s.every_for("app", &home.join("a/app")), 1800);
         assert_eq!(s.every_for("api", &home.join("b/api")), 3600);
         assert_eq!(s.every_for("api", &home.join("a/api")), 12 * 3600);
@@ -793,7 +797,7 @@ mod tests {
     }
 
     fn sh(dir: &Path, cmd: &str) {
-        let st = Command::new("sh")
+        let st = Command::new(crate::core::tools::sh())
             .arg("-c")
             .arg(cmd)
             .current_dir(dir)

@@ -191,8 +191,7 @@ pub fn serve(o: ServeOpts) -> Result<()> {
         println!("{} {}", envs.join(" "), hosts::display_command(&c));
         return Ok(());
     }
-    use std::os::unix::process::CommandExt;
-    Err(Error::Other(format!("cannot exec node: {}", c.exec())))
+    crate::core::tmux::exec_or_wait(&mut c, "node")
 }
 
 pub const LAUNCHD_LABEL: &str = "bearclaw.web";
@@ -317,7 +316,8 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         print!("{}", systemd_unit(&exe, &cfg_path));
         return Ok(());
     }
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+    let home =
+        crate::core::tools::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
     let log = home.join(SERVICE_LOG);
     // The server fails fast without these; say so now rather than in a log.
     let node = if o.uninstall {
@@ -347,7 +347,8 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
 /// Write (or remove) `~/Library/LaunchAgents/<label>.plist` and (re)load it — or, with
 /// `--print`, only print it. Shared by every bearclaw launchd agent.
 pub fn launchd_agent(label: &str, plist: &str, log: &Path, o: &ServiceOpts) -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+    let home =
+        crate::core::tools::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
     let plist_path = home
         .join("Library/LaunchAgents")
         .join(format!("{label}.plist"));
@@ -427,10 +428,13 @@ mod tests {
     fn node_prefers_config_then_stable_then_path() {
         let tmp = std::env::temp_dir().join(format!("bearclaw-node-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let stable = tmp.join("node");
+        let stable = tmp.join(if cfg!(windows) { "node.exe" } else { "node" });
         std::fs::write(&stable, "").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&stable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let nvm = PathBuf::from("/h/.nvm/versions/node/v22.1.0/bin/node");
         let missing = tmp.join("missing/node");
 

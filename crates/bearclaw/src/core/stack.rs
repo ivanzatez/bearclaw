@@ -82,7 +82,7 @@ pub fn stacks_dir() -> Result<PathBuf> {
     } else {
         let base = match env("XDG_STATE_HOME") {
             Some(x) => expand(&x),
-            None => dirs::home_dir()
+            None => crate::core::tools::home_dir()
                 .ok_or_else(|| Error::Other("no home directory".into()))?
                 .join(".local")
                 .join("state"),
@@ -438,7 +438,7 @@ pub struct Paths {
 
 impl Paths {
     pub fn current() -> Self {
-        let home = dirs::home_dir();
+        let home = crate::core::tools::home_dir();
         Paths {
             briefs_dir: brief::briefs_dir().unwrap_or_else(|_| {
                 home.clone()
@@ -454,7 +454,7 @@ impl Paths {
         if let Some(h) = self.home.as_ref().and_then(|h| h.to_str())
             && !h.is_empty()
             && let Some(rest) = p.strip_prefix(h)
-            && (rest.is_empty() || rest.starts_with('/'))
+            && (rest.is_empty() || rest.starts_with(crate::core::tools::is_sep))
         {
             return format!("~{rest}");
         }
@@ -463,7 +463,9 @@ impl Paths {
     /// `~/a` → `/home/x/a` (else as is).
     pub fn expand(&self, p: &str) -> String {
         match (p.strip_prefix('~'), &self.home) {
-            (Some(rest), Some(h)) if rest.is_empty() || rest.starts_with('/') => {
+            (Some(rest), Some(h))
+                if rest.is_empty() || rest.starts_with(crate::core::tools::is_sep) =>
+            {
                 format!("{}{rest}", h.display())
             }
             _ => p.to_string(),
@@ -475,7 +477,7 @@ impl Paths {
     /// `~/.claude/projects/<cwd with / and . as ->/<id>.jsonl` for an absolute cwd.
     pub fn transcript_path(&self, cwd: &str, session_id: &str) -> Option<PathBuf> {
         let abs = self.expand(cwd);
-        abs.starts_with('/').then(|| {
+        crate::core::tools::is_abs(&abs).then(|| {
             self.claude_home
                 .join("projects")
                 .join(discovery::encode_cwd(&abs))
@@ -1091,7 +1093,7 @@ pub fn view(stack: &Stack, c: &ViewCtx) -> Value {
     let abs = cwd
         .as_deref()
         .map(|p| c.paths.expand(p))
-        .filter(|p| p.starts_with('/'));
+        .filter(|p| crate::core::tools::is_abs(p));
     let members: Vec<Value> = stack
         .members
         .iter()
@@ -1352,7 +1354,7 @@ pub fn git_line(dir: &str, paths: &Paths) -> Option<String> {
     let [top, git_dir, common] = parts[..] else {
         return None;
     };
-    if !top.starts_with('/') {
+    if !crate::core::tools::is_abs(top) {
         return None;
     }
     let linked = git_dir.trim_end_matches('/') != common.trim_end_matches('/');
@@ -1837,12 +1839,15 @@ mod tests {
         );
         let back = load(d.path(), "st-1a2b3c4d").unwrap().unwrap();
         assert_eq!(back.members[0].closed.as_deref(), Some(LATER));
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(d.path().join("st-1a2b3c4d.md"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(d.path().join("st-1a2b3c4d.md"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
         // stamp_stacks is read-only.
         let mut rows = vec![row(SID, "x"), row("cccccccc-0000", "y")];
         stamp_stacks_in(d.path(), "laptop", &mut rows);

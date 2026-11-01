@@ -42,7 +42,11 @@ pub fn path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(crate::core::tools::expand_tilde(&p.to_string_lossy())))
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".config")
+        });
     base.join("bearclaw").join("config.json")
 }
 

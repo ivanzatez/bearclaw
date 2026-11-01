@@ -162,14 +162,14 @@ pub fn mux_enabled() -> bool {
     std::env::var("BEARCLAW_MUX")
         .map(|v| v.trim() != "0")
         .unwrap_or(true)
-        && dirs::home_dir().is_some_and(|h| h.join(".ssh").is_dir())
+        && crate::core::tools::home_dir().is_some_and(|h| h.join(".ssh").is_dir())
 }
 
 /// The control socket pattern (ssh expands `%C`).
 pub fn mux_path() -> String {
     format!(
         "{}/.ssh/bearclaw-mux-%C",
-        dirs::home_dir().unwrap_or_default().display()
+        crate::core::tools::home_dir().unwrap_or_default().display()
     )
 }
 
@@ -725,7 +725,11 @@ mod tests {
         probe.push_str(
             "printf '%s|%s|%s' \"$BEARCLAW_CMD\" \"$BEARCLAW_DEBUG\" \"$BEARCLAW_DRY_RUN\"",
         );
-        let out = Command::new("sh").arg("-c").arg(&probe).output().unwrap();
+        let out = Command::new(crate::core::tools::sh())
+            .arg("-c")
+            .arg(&probe)
+            .output()
+            .unwrap();
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
             "cat #|1|it's $(rm -rf ~)"
@@ -755,7 +759,10 @@ mod tests {
 
     #[test]
     fn dir_args_are_remapped_under_home() {
-        let home = dirs::home_dir().unwrap().display().to_string();
+        let home = crate::core::tools::home_dir()
+            .unwrap()
+            .display()
+            .to_string();
         let out = remap_dir_args(&s(&["spawn", "--dir", &format!("{home}/Code/x"), "go"])).unwrap();
         assert_eq!(out, s(&["spawn", "--dir", "~/Code/x", "go"]));
         let out = remap_dir_args(&s(&["tmux", "new", "-C", "/srv/x"])).unwrap();
@@ -770,13 +777,13 @@ mod tests {
 
     #[test]
     fn capture_times_out_and_drains_large_output() {
-        let mut c = Command::new("sh");
+        let mut c = Command::new(crate::core::tools::sh());
         c.args(["-c", "yes x | head -c 300000"]);
         let got = capture(c, Duration::from_secs(10)).unwrap();
         assert!(got.ok());
         assert_eq!(got.stdout.len(), 300000);
 
-        let mut c = Command::new("sh");
+        let mut c = Command::new(crate::core::tools::sh());
         c.args(["-c", "sleep 5"]);
         let got = capture(c, Duration::from_millis(200)).unwrap();
         assert!(got.timed_out && !got.ok());

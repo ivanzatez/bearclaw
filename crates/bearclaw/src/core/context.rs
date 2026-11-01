@@ -131,7 +131,11 @@ impl Hints {
         };
         let state = std::env::var_os("CLAUDE_CONFIG_DIR")
             .map(|d| PathBuf::from(d).join(".claude.json"))
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude.json"));
+            .unwrap_or_else(|| {
+                crate::core::tools::home_dir()
+                    .unwrap_or_default()
+                    .join(".claude.json")
+            });
         if let Ok(text) = std::fs::read_to_string(state) {
             h.add_state(&text);
         }

@@ -4,6 +4,9 @@
 //! the snapshot and the boot id all live in a temp dir. A reboot is simulated by killing the
 //! isolated server and changing `BEARCLAW_BOOT_ID`. The user's own tmux server and sessions are
 //! never visible, let alone touched.
+//!
+//! Unix only: the fakes are `#!/bin/sh` scripts.
+#![cfg(unix)]
 
 mod common;
 

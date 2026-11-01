@@ -48,7 +48,7 @@ pub fn briefs_dir() -> Result<PathBuf> {
     } else {
         let base = match env("XDG_STATE_HOME") {
             Some(x) => expand(&x),
-            None => dirs::home_dir()
+            None => crate::core::tools::home_dir()
                 .ok_or_else(|| Error::Other("no home directory".into()))?
                 .join(".local")
                 .join("state"),
@@ -99,13 +99,13 @@ pub fn write(dir: &Path, id: &str, text: &str) -> Result<()> {
 /// temp file next to it and a rename, so a reader never sees half of it. Shared by every
 /// bearclaw state file that is not the config (briefs, the session snapshot).
 pub fn write_private(target: &Path, text: &str) -> Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use crate::core::tools::PrivateMode;
     let dir = target
         .parent()
         .ok_or_else(|| Error::Other(format!("no parent dir: {}", target.display())))?;
     std::fs::DirBuilder::new()
         .recursive(true)
-        .mode(0o700)
+        .private(0o700)
         .create(dir)?;
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -120,7 +120,7 @@ pub fn write_private(target: &Path, text: &str) -> Result<()> {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .private(0o600)
             .open(&tmp)?;
         f.write_all(text.as_bytes())?;
         f.sync_all()?;
@@ -1199,12 +1199,15 @@ mod tests {
         write(&dir, SID, "x").unwrap();
         write(&dir, SID, "y").unwrap();
         assert_eq!(read(&dir, SID).unwrap().as_deref(), Some("y"));
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(file(&dir, SID).unwrap())
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(file(&dir, SID).unwrap())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
         // No temp files left behind.
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     }

@@ -13,7 +13,7 @@ use crate::core::tools::slugify;
 /// Where the brain lives, read fresh so a config edit applies. See [`root_from`].
 pub fn root() -> PathBuf {
     let raw = config::load_from(&config::path()).raw;
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = crate::core::tools::home_dir().unwrap_or_default();
     let brainrc = fs::read_to_string(home.join(".brainrc")).ok();
     root_from(&raw, brainrc.as_deref(), &home)
 }

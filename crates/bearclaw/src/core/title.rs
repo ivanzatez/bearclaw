@@ -209,7 +209,7 @@ pub fn is_generic_tmux_name(name: &str, cwd: Option<&str>) -> bool {
     }
     let base = cwd
         .unwrap_or("")
-        .rsplit('/')
+        .rsplit(crate::core::tools::is_sep)
         .find(|p| !p.is_empty())
         .unwrap_or("");
     if base.is_empty() {

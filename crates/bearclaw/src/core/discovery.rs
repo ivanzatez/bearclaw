@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::core::harness::{self, Harness};
 
 pub fn claude_home() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".claude")
+    crate::core::tools::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,8 +169,8 @@ impl Session {
                 let dir = self
                     .cwd
                     .as_deref()?
-                    .trim_end_matches('/')
-                    .rsplit('/')
+                    .trim_end_matches(crate::core::tools::is_sep)
+                    .rsplit(crate::core::tools::is_sep)
                     .next()?;
                 (self.harness != Harness::Claude && !dir.is_empty())
                     .then(|| format!("{dir}-{}", self.harness))
@@ -264,6 +266,11 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
     }
     let dir = claude_home().join("sessions");
     let panes = tmux_panes();
+    let procs = if cfg!(windows) {
+        crate::core::procs::table()
+    } else {
+        Vec::new()
+    };
     let mut out = Vec::new();
 
     let entries = match std::fs::read_dir(&dir) {
@@ -293,7 +300,12 @@ pub fn discover_checked() -> Result<Vec<Session>, String> {
             continue;
         }
         // ps returns non-zero for a dead pid, so this doubles as a liveness check.
-        let Some(tty) = tty_of(pid) else { continue };
+        let tty = if cfg!(windows) {
+            win_tty_of(pid, &procs, &panes)
+        } else {
+            tty_of(pid)
+        };
+        let Some(tty) = tty else { continue };
         let (backend, handle) = backend_of(pid, Some(tty.as_str()), &panes);
         // tmux tab (window name) is free from the panes query; iTerm tab titles are
         // filled lazily by enrich_iterm_tabs (one AppleScript call) only for display.
@@ -571,7 +583,31 @@ pub fn origin() -> Option<Session> {
 
 // --- process introspection ---------------------------------------------------
 
+/// Windows has no ttys. A pane's key there is its shell's pid (`pid<n>`, see
+/// [`tmux_panes`]), so a session's "tty" is that of the pane whose shell is one of its
+/// ancestors, `console` when it runs in some other terminal, `None` when it is dead.
+fn win_tty_of(
+    pid: i64,
+    procs: &[crate::core::procs::Proc],
+    panes: &HashMap<String, Pane>,
+) -> Option<String> {
+    if !procs.iter().any(|p| p.pid == pid) {
+        return None;
+    }
+    let chain = crate::core::procs::ancestors(procs, pid, 8);
+    Some(
+        chain
+            .iter()
+            .map(|a| format!("pid{a}"))
+            .find(|t| panes.contains_key(&format!("/dev/{t}")))
+            .unwrap_or_else(|| "console".into()),
+    )
+}
+
 fn ppid_of(pid: i64) -> Option<i64> {
+    if cfg!(windows) {
+        return crate::core::procs::ppid_of(pid);
+    }
     let out = Command::new("ps")
         .args(["-o", "ppid=", "-p", &pid.to_string()])
         .output()
@@ -661,14 +697,27 @@ fn tmux_panes() -> HashMap<String, Pane> {
             "list-panes",
             "-a",
             "-F",
-            "#{pane_tty}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{window_name}\t#{session_name}\t#{@bearclaw_job_run}",
+            "#{pane_tty}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_id}\t#{window_name}\t#{session_name}\t#{@bearclaw_job_run}\t#{pane_pid}",
         ])
         .output()
     else {
         return map;
     };
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        map.extend(parse_pane(line));
+        let entry = parse_pane(line);
+        if cfg!(windows) {
+            // No ttys on Windows: key the pane by its shell's pid (see `win_tty_of`).
+            if let Some(pid) = line
+                .rsplit('\t')
+                .next()
+                .and_then(|p| p.trim().parse::<i64>().ok())
+                && let Some((_, pane)) = entry
+            {
+                map.insert(format!("/dev/pid{pid}"), pane);
+            }
+            continue;
+        }
+        map.extend(entry);
     }
     map
 }
@@ -754,8 +803,16 @@ end tell"#;
 // --- transcript title --------------------------------------------------------
 
 pub(crate) fn encode_cwd(cwd: &str) -> String {
+    // Windows paths (`C:\Users\x`) become `C--Users-x`: the drive colon and the
+    // backslashes go the same way as `/`.
     cwd.chars()
-        .map(|c| if c == '/' || c == '.' { '-' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | '.' | '\\' | ':') {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -970,6 +1027,7 @@ mod tests {
     fn cwd_encoding() {
         assert_eq!(encode_cwd("/home/user/Code/app"), "-home-user-Code-app");
         assert_eq!(encode_cwd("/a/b.c"), "-a-b-c");
+        assert_eq!(encode_cwd(r"C:\Users\me\Code"), "C--Users-me-Code");
     }
 
     #[test]

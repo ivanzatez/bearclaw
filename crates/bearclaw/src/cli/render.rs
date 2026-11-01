@@ -17,7 +17,7 @@ pub fn term_width() -> usize {
 }
 
 pub fn home_rel(path: &str) -> String {
-    match dirs::home_dir().and_then(|h| h.to_str().map(String::from)) {
+    match crate::core::tools::home_dir().and_then(|h| h.to_str().map(String::from)) {
         Some(home) if path.starts_with(&home) => format!("~{}", &path[home.len()..]),
         _ => path.to_string(),
     }

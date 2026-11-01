@@ -150,7 +150,7 @@ pub fn state_path() -> PathBuf {
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(crate::core::tools::expand_tilde(&p.to_string_lossy())))
         .unwrap_or_else(|| {
-            dirs::home_dir()
+            crate::core::tools::home_dir()
                 .unwrap_or_default()
                 .join(".local")
                 .join("state")
@@ -354,7 +354,10 @@ fn excerpt(s: &str, n: usize) -> String {
 /// The repository a cwd belongs to, worktree-aware: `…/app/.worktrees/fix-x`
 /// and `…/app/.claude/worktrees/fix-x` are both `app`.
 pub fn repo_of(cwd: &str) -> Option<String> {
-    let parts: Vec<&str> = cwd.split('/').filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = cwd
+        .split(crate::core::tools::is_sep)
+        .filter(|p| !p.is_empty())
+        .collect();
     let mut end = parts.len();
     if let Some(i) = parts
         .iter()
@@ -458,7 +461,11 @@ fn session_line(i: usize, it: &Item) -> String {
         line.push_str(&format!(" (name: {})", excerpt(n, 40)));
     }
     if let Some(cwd) = it.cwd.as_deref() {
-        let tail: Vec<&str> = cwd.rsplit('/').filter(|p| !p.is_empty()).take(2).collect();
+        let tail: Vec<&str> = cwd
+            .rsplit(crate::core::tools::is_sep)
+            .filter(|p| !p.is_empty())
+            .take(2)
+            .collect();
         let tail: Vec<&str> = tail.into_iter().rev().collect();
         line.push_str(&format!(" | dir: {}", tail.join("/")));
     }

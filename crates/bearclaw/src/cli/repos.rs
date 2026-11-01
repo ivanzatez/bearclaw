@@ -381,7 +381,8 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         ));
     }
     let exe = crate::cli::hosts::current_exe()?;
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+    let home =
+        crate::core::tools::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
     let log = home.join(SERVICE_LOG);
     // git, plus whatever its credential helpers / ssh need (Homebrew first).
     let git = tools::find_binary("git").unwrap_or_else(|| "/usr/bin/git".into());

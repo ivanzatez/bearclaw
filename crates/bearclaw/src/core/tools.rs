@@ -7,13 +7,53 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+/// The home directory: `$HOME`, as on Unix (where `dirs` reads it too). On Windows `dirs`
+/// asks the shell for the profile folder and ignores `$HOME`, so the tests' temp homes
+/// would land in the real one; there `$HOME` counts when it is an absolute Windows path
+/// (Git Bash's `/c/Users/x` is not).
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
+        .or_else(dirs::home_dir)
+}
+
+/// Is `p` absolute: `/x` (what a Unix host, this one or a remote one, means) or, on
+/// Windows, `C:\x` / `C:/x`.
+pub fn is_abs(p: &str) -> bool {
+    p.starts_with('/') || Path::new(p).is_absolute()
+}
+
+/// A path separator: `/`, and on Windows `\` too.
+pub fn is_sep(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
+}
+
 /// Directories searched after `$PATH`.
 fn fallback_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ];
-    if let Some(home) = dirs::home_dir() {
+    let mut dirs = if cfg!(windows) {
+        // Git for Windows carries the POSIX tools (`sh`, `cat`, `env`) every shell line
+        // bearclaw writes relies on; winget installs land in its Links dir.
+        let pf = std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+        let mut d = vec![
+            pf.join(r"Git\cmd"),
+            pf.join(r"Git\bin"),
+            pf.join(r"Git\usr\bin"),
+            pf.join(r"nodejs"),
+        ];
+        if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            d.push(local.join(r"Microsoft\WinGet\Links"));
+        }
+        d
+    } else {
+        vec![
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]
+    };
+    if let Some(home) = home_dir() {
         dirs.push(home.join(".local/bin"));
         dirs.push(home.join(".cargo/bin"));
         dirs.push(home.join("bin"));
@@ -28,6 +68,7 @@ pub fn search_path() -> std::ffi::OsString {
     std::env::join_paths(std::env::split_paths(&path).chain(fallback_dirs())).unwrap_or(path)
 }
 
+#[cfg(unix)]
 pub fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p)
@@ -35,13 +76,68 @@ pub fn is_executable(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Windows has no execute bit: a file with one of the `PATHEXT` extensions runs.
+#[cfg(windows)]
+pub fn is_executable(p: &Path) -> bool {
+    let runs = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ["exe", "cmd", "bat", "com"].contains(&e.to_ascii_lowercase().as_str()));
+    runs && p.is_file()
+}
+
+/// The names `name` can have on disk: itself, and on Windows with each runnable extension.
+fn candidates(name: &str) -> Vec<String> {
+    if cfg!(windows) && Path::new(name).extension().is_none() {
+        ["exe", "cmd", "bat", "com"]
+            .iter()
+            .map(|e| format!("{name}.{e}"))
+            .collect()
+    } else {
+        vec![name.to_string()]
+    }
+}
+
 /// First executable called `name` on `$PATH`, then in the fallback dirs.
 pub fn find_binary(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
+    let names = candidates(name);
     std::env::split_paths(&path)
         .chain(fallback_dirs())
-        .map(|d| d.join(name))
+        .flat_map(|d| names.iter().map(move |n| d.join(n)).collect::<Vec<_>>())
         .find(|p| is_executable(p))
+}
+
+/// The POSIX shell for `sh -c` lines: `sh` itself, or Git for Windows' `sh.exe`.
+pub fn sh() -> &'static str {
+    static SH: OnceLock<String> = OnceLock::new();
+    SH.get_or_init(|| {
+        if cfg!(windows) {
+            git_bash().unwrap_or_else(|| resolve_binary("sh", None))
+        } else {
+            "sh".to_string()
+        }
+    })
+}
+
+/// Git for Windows' `bash.exe` (not WSL's `bash.exe` in System32): the shell tmux panes
+/// run on Windows, so the POSIX lines bearclaw types into them work as they do on a Mac.
+pub fn git_bash() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let pf = std::env::var_os("ProgramFiles").map(PathBuf::from)?;
+    [
+        pf.join(r"Git\bin\bash.exe"),
+        pf.join(r"Git\usr\bin\bash.exe"),
+    ]
+    .into_iter()
+    .chain(find_binary("git").and_then(|g| {
+        // <root>\cmd\git.exe -> <root>\bin\bash.exe
+        Some(g.parent()?.parent()?.join(r"bin\bash.exe"))
+    }))
+    .find(|p| p.is_file())
+    .map(|p| p.display().to_string())
 }
 
 /// `explicit` (a configured path, `~` allowed) when set, else [`find_binary`],
@@ -79,7 +175,7 @@ pub fn tmux_cmd() -> std::process::Command {
 pub fn claude() -> Option<String> {
     find_binary("claude")
         .or_else(|| {
-            dirs::home_dir()
+            home_dir()
                 .map(|h| h.join(".claude/local/claude"))
                 .filter(|p| is_executable(p))
         })
@@ -88,7 +184,7 @@ pub fn claude() -> Option<String> {
 
 /// Expand a leading `~` / `~/` against `$HOME`. Anything else passes through.
 pub fn expand_tilde(p: &str) -> String {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = home_dir() else {
         return p.to_string();
     };
     if p == "~" {
@@ -103,9 +199,14 @@ pub fn expand_tilde(p: &str) -> String {
 /// Rewrite an absolute path under this machine's `$HOME` to `~/…`, so it means
 /// "the same place under *your* home" on a remote host.
 pub fn tildify(p: &str) -> String {
-    match dirs::home_dir().and_then(|h| h.to_str().map(String::from)) {
+    match home_dir().and_then(|h| h.to_str().map(String::from)) {
         Some(home) if p == home => "~".into(),
-        Some(home) if p.starts_with(&format!("{home}/")) => format!("~{}", &p[home.len()..]),
+        Some(home)
+            if p.strip_prefix(home.as_str())
+                .is_some_and(|r| r.starts_with(is_sep)) =>
+        {
+            format!("~{}", &p[home.len()..])
+        }
         _ => p.to_string(),
     }
 }
@@ -141,6 +242,31 @@ pub fn remote_path(p: &str) -> String {
     shq(p)
 }
 
+/// Unix permission bits for a file or directory being created (`0o600`, `0o700`).
+/// Windows has no mode bits — a profile directory is private to its user already — so
+/// there the mode is ignored.
+pub trait PrivateMode {
+    fn private(&mut self, mode: u32) -> &mut Self;
+}
+
+impl PrivateMode for std::fs::OpenOptions {
+    fn private(&mut self, mode: u32) -> &mut Self {
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(self, mode);
+        let _ = mode;
+        self
+    }
+}
+
+impl PrivateMode for std::fs::DirBuilder {
+    fn private(&mut self, mode: u32) -> &mut Self {
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(self, mode);
+        let _ = mode;
+        self
+    }
+}
+
 /// Truthy env flag: `1`, `true`, `yes`.
 pub fn env_flag(name: &str) -> bool {
     std::env::var(name)
@@ -156,6 +282,13 @@ pub fn interactive() -> bool {
 
 /// Short hostname, lowercased (`hostname -s`), used only as a default name.
 pub fn short_hostname() -> String {
+    if cfg!(windows) {
+        return std::env::var("COMPUTERNAME")
+            .map(|h| h.trim().to_lowercase())
+            .ok()
+            .filter(|h| !h.is_empty())
+            .unwrap_or_else(|| "local".into());
+    }
     std::process::Command::new("hostname")
         .arg("-s")
         .output()
@@ -200,10 +333,17 @@ pub fn open_url(url: &str) -> Result<(), String> {
     }
     let bin = if cfg!(target_os = "macos") {
         "open"
+    } else if cfg!(windows) {
+        // The URL handler, not `cmd /c start`: cmd would read `&` in a query string.
+        "rundll32"
     } else {
         "xdg-open"
     };
-    let mut child = std::process::Command::new(bin)
+    let mut cmd = std::process::Command::new(bin);
+    if cfg!(windows) {
+        cmd.arg("url.dll,FileProtocolHandler");
+    }
+    let mut child = cmd
         .arg(url)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -269,9 +409,12 @@ mod tests {
 
     #[test]
     fn tilde_round_trip() {
-        let home = dirs::home_dir().unwrap().display().to_string();
+        let home = home_dir().unwrap().display().to_string();
         assert_eq!(expand_tilde("~"), home);
-        assert_eq!(expand_tilde("~/x"), format!("{home}/x"));
+        assert_eq!(
+            expand_tilde("~/x"),
+            std::path::Path::new(&home).join("x").display().to_string()
+        );
         assert_eq!(expand_tilde("/abs"), "/abs");
         assert_eq!(tildify(&format!("{home}/x/y")), "~/x/y");
         assert_eq!(tildify(&home), "~");

@@ -156,14 +156,22 @@ pub fn codex_home() -> PathBuf {
     std::env::var_os("CODEX_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"))
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".codex")
+        })
 }
 
 pub fn pi_home() -> PathBuf {
     std::env::var_os("PI_CODING_AGENT_DIR")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".pi/agent"))
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".pi/agent")
+        })
 }
 
 /// Codex's picker: the listed models of its own cache (`models_cache.json`, in its

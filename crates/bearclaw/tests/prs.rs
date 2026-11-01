@@ -1,4 +1,6 @@
 //! `bearclaw prs` against a fake `gh` (BEARCLAW_GH): columns, the cache, a failing fetch.
+//! Unix only: the fake `gh` is a `#!/bin/sh` script.
+#![cfg(unix)]
 
 mod common;
 

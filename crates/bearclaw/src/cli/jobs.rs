@@ -641,7 +641,8 @@ pub fn install_service(o: ServiceOpts) -> Result<()> {
         ));
     }
     let exe = crate::cli::hosts::current_exe()?;
-    let home = dirs::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
+    let home =
+        crate::core::tools::home_dir().ok_or_else(|| Error::Other("no home directory".into()))?;
     let log = home.join(SERVICE_LOG);
     let tmux = tools::find_binary("tmux").unwrap_or_else(|| "/opt/homebrew/bin/tmux".into());
     let path = web::service_path(

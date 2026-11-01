@@ -273,7 +273,11 @@ fn fetch_live(home: &Path) -> Result<(Value, Option<Account>), String> {
 fn claude_state_path() -> PathBuf {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(|d| PathBuf::from(d).join(".claude.json"))
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".claude.json"))
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".claude.json")
+        })
 }
 
 fn account(creds: &Value) -> Option<Account> {

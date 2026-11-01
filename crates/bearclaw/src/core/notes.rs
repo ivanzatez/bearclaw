@@ -15,6 +15,8 @@ pub fn root() -> PathBuf {
         .filter(|s| !s.is_empty())
     {
         Some(r) => PathBuf::from(expand_tilde(r)),
-        None => dirs::home_dir().unwrap_or_default().join("notes"),
+        None => crate::core::tools::home_dir()
+            .unwrap_or_default()
+            .join("notes"),
     }
 }

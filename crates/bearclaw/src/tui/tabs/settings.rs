@@ -110,7 +110,7 @@ impl SettingsView {
             line(format!("  status    {status}"));
         }
         line(String::new());
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = crate::core::tools::home_dir().unwrap_or_default();
         let brainrc = std::fs::read_to_string(home.join(".brainrc")).ok();
         let root = brain::root_from(raw, brainrc.as_deref(), &home);
         let hook = std::fs::read_to_string(&self.claude_settings)

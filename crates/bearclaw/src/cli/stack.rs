@@ -759,7 +759,7 @@ pub fn set(q: &str, expect_updated: Option<&str>, json: bool) -> Result<()> {
 
 /// Put `body` in a temp file, open the editor, read it back. → (text, temp path).
 fn edit_text(body: &str, id: &str) -> Result<(String, PathBuf)> {
-    use std::os::unix::fs::OpenOptionsExt;
+    use crate::core::tools::PrivateMode;
     let path = std::env::temp_dir().join(format!(
         "bearclaw-{id}-{}-{}.md",
         std::process::id(),
@@ -768,7 +768,7 @@ fn edit_text(body: &str, id: &str) -> Result<(String, PathBuf)> {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .private(0o600)
         .open(&path)?;
     f.write_all(body.as_bytes())?;
     drop(f);

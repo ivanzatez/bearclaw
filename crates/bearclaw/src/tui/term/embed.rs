@@ -57,8 +57,9 @@ impl Embedded {
     /// Run `cmd` (a tmux client) in a new PTY of `rows`×`cols`.
     pub fn attach_cmd(mut cmd: CommandBuilder, rows: u16, cols: u16) -> Result<Embedded, String> {
         cmd.env("TERM", "xterm-256color");
-        // A client started from inside tmux would refuse to nest.
+        // A client started from inside tmux would refuse to nest (psmux checks its own variable).
         cmd.env_remove("TMUX");
+        cmd.env_remove("PSMUX_SESSION");
         let pair = native_pty_system()
             .openpty(size(rows, cols))
             .map_err(|e| format!("pty: {e}"))?;
@@ -137,6 +138,13 @@ impl Embedded {
             match self.rx.try_recv() {
                 Ok(bytes) => {
                     self.parser.process(&bytes);
+                    // A cursor position request (DSR) wants an answer from the terminal — that
+                    // is us. Windows' ConPTY sends one before anything else and waits for it.
+                    if bytes.windows(4).any(|w| w == b"\x1b[6n") {
+                        let (row, col) = self.parser.screen().cursor_position();
+                        let reply = format!("\x1b[{};{}R", row + 1, col + 1);
+                        self.write(reply.as_bytes());
+                    }
                     changed = true;
                 }
                 Err(TryRecvError::Empty) => break,

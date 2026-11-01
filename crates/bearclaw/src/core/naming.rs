@@ -263,8 +263,8 @@ fn git_branch(cwd: &str, cancel: &AtomicBool) -> Option<String> {
 // --- context -----------------------------------------------------------------
 
 fn basename(path: &str) -> &str {
-    path.trim_end_matches('/')
-        .rsplit('/')
+    path.trim_end_matches(crate::core::tools::is_sep)
+        .rsplit(crate::core::tools::is_sep)
         .next()
         .unwrap_or(path)
 }
@@ -1492,6 +1492,10 @@ mod tests {
     /// Asked about one specific pid, not "our children", so tests running in
     /// parallel can't see each other's.
     fn reaped(pid: u32) -> bool {
+        // Windows has no zombies: a collected child is simply gone.
+        if cfg!(windows) {
+            return !crate::core::procs::alive(pid as i64);
+        }
         let out = Command::new("ps")
             .args(["-o", "stat=", "-p", &pid.to_string()])
             .output()
@@ -1503,7 +1507,7 @@ mod tests {
     // prompt write gets EPIPE, `suggest_with` retries — so a 12-session pass
     // used to leave up to 24 zombies inside a `watch` that runs for hours.
     fn sleeper() -> Child {
-        Command::new("sh")
+        Command::new(crate::core::tools::sh())
             .arg("-c")
             .arg("sleep 30")
             .stdin(Stdio::piped())
@@ -1542,7 +1546,7 @@ mod tests {
     // the retry does it again, and one session stalls the pass for 50s.
     #[test]
     fn a_chatty_child_does_not_wedge_the_poll() {
-        let child = Command::new("sh")
+        let child = Command::new(crate::core::tools::sh())
             .arg("-c")
             .arg("i=0; while [ $i -lt 4000 ]; do echo 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >&2; i=$((i+1)); done; echo cache-warmup")
             .stdin(Stdio::piped())
@@ -1570,7 +1574,7 @@ mod tests {
         // The child records its own pid so the test can ask about that one
         // process rather than about the whole table.
         let hang = |file: &std::path::Path| {
-            let mut cmd = Command::new("sh");
+            let mut cmd = Command::new(crate::core::tools::sh());
             cmd.arg("-c")
                 .arg(format!("echo $$ > {}; sleep 30", file.display()));
             cmd
@@ -1625,12 +1629,12 @@ mod tests {
 
     #[test]
     fn a_bounded_command_still_returns_its_output() {
-        let mut cmd = Command::new("sh");
+        let mut cmd = Command::new(crate::core::tools::sh());
         cmd.arg("-c").arg("echo someone/cache-warmup");
         let out = bounded_output(&mut cmd, Duration::from_secs(5), &AtomicBool::new(false));
         assert_eq!(out.as_deref().map(str::trim), Some("someone/cache-warmup"));
         // A non-zero exit is not an answer.
-        let mut cmd = Command::new("sh");
+        let mut cmd = Command::new(crate::core::tools::sh());
         cmd.arg("-c").arg("echo nope; exit 1");
         assert!(
             bounded_output(&mut cmd, Duration::from_secs(5), &AtomicBool::new(false)).is_none()

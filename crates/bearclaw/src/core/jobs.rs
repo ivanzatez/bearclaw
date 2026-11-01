@@ -605,7 +605,11 @@ pub fn state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(tools::expand_tilde(&p.to_string_lossy())))
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/state"));
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".local/state")
+        });
     base.join("bearclaw").join("jobs")
 }
 

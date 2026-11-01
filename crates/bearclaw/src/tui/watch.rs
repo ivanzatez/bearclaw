@@ -2540,7 +2540,12 @@ mod tests {
             status: "idle".into(),
             ..Default::default()
         };
-        let home = |rest: &str| format!("{}/{rest}", dirs::home_dir().unwrap().display());
+        let home = |rest: &str| {
+            format!(
+                "{}/{rest}",
+                crate::core::tools::home_dir().unwrap().display()
+            )
+        };
         let title = |w: u16, rows: &[Session]| {
             let plan = dashlayout::plan(w, 40, rows.len(), 22, None);
             sessions_title(&BearclawCtx::of(rows, &plan))

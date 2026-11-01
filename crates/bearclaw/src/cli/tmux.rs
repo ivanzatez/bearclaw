@@ -685,7 +685,7 @@ pub fn new(name: Option<&str>, detach: bool, dir: Option<&str>, cmd: &[String]) 
         ));
     }
     if let Some(d) = dir
-        && !(d.starts_with('/') || d == "~" || d.starts_with("~/"))
+        && !(crate::core::tools::is_abs(d) || d == "~" || d.starts_with("~/"))
     {
         // Resolve a relative dir here, where it means something.
         let abs = std::env::current_dir()?.join(d);

@@ -23,7 +23,11 @@ pub fn dir() -> PathBuf {
     std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/state"))
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".local/state")
+        })
         .join("bearclaw/sticky")
 }
 

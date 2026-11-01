@@ -129,7 +129,7 @@ pub fn editor() -> String {
 pub fn open_editor(path: &std::path::Path) -> Result<()> {
     let editor = editor();
     // $EDITOR may carry flags (`code -w`): let the shell split it.
-    let st = std::process::Command::new("sh")
+    let st = std::process::Command::new(crate::core::tools::sh())
         .args(["-c", &format!("{editor} \"$1\""), "bearclaw-edit"])
         .arg(path)
         .status()?;

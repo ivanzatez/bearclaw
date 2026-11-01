@@ -62,7 +62,7 @@ pub fn exec(target: &Target, dir: Option<&str>, tty: bool, argv: &[String]) -> R
         Target::Remote(r) => {
             let dir = tools::tildify(dir);
             let dir = dir.as_str();
-            if !(dir.starts_with('/') || dir == "~" || dir.starts_with("~/")) {
+            if !(crate::core::tools::is_abs(dir) || dir == "~" || dir.starts_with("~/")) {
                 return Err(Error::exit(
                     1,
                     format!("--dir must be absolute or ~/… when targeting {}", r.name),
@@ -83,7 +83,10 @@ pub fn exec(target: &Target, dir: Option<&str>, tty: bool, argv: &[String]) -> R
 pub fn ssh(target: &Target, argv: &[String]) -> Result<i32> {
     match target {
         Target::Local { .. } => {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            let shell = std::env::var("SHELL")
+                .ok()
+                .or_else(tools::git_bash)
+                .unwrap_or_else(|| "/bin/sh".into());
             let mut c = Command::new(&shell);
             if argv.is_empty() {
                 c.arg("-l");
@@ -95,8 +98,7 @@ pub fn ssh(target: &Target, argv: &[String]) -> Result<i32> {
                 println!("{}", hosts::display_command(&c));
                 return Ok(0);
             }
-            use std::os::unix::process::CommandExt;
-            Err(Error::Other(format!("cannot exec {shell}: {}", c.exec())))
+            crate::core::tmux::exec_or_wait(&mut c, &shell).map(|()| 0)
         }
         Target::Remote(r) => {
             let s = if argv.is_empty() {
@@ -544,7 +546,7 @@ fn sync_dir(r: &Remote, local: &Path, remote_dir: &str, skip_top: &[&str]) -> Re
             d = remote_path(remote_dir)
         ))
     );
-    let mut c = Command::new("sh");
+    let mut c = Command::new(crate::core::tools::sh());
     c.args(["-c", &script]);
     run_step("copy web app", c)
 }

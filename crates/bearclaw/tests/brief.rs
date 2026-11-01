@@ -244,6 +244,8 @@ fn set_under_dry_run_writes_nothing() {
     assert_eq!(t.read_brief(SID), SAMPLE);
 }
 
+// The scripted editor is a `#!/bin/sh` file, which Windows can't run.
+#[cfg(unix)]
 #[test]
 fn edit_uses_the_editor_on_the_body() {
     let t = T::new();

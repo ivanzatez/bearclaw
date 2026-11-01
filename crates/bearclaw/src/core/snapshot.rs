@@ -357,7 +357,7 @@ pub fn path() -> PathBuf {
         .filter(|p| !p.is_empty())
         .map(|p| PathBuf::from(tools::expand_tilde(&p.to_string_lossy())))
         .unwrap_or_else(|| {
-            dirs::home_dir()
+            crate::core::tools::home_dir()
                 .unwrap_or_default()
                 .join(".local")
                 .join("state")
@@ -384,11 +384,11 @@ pub fn save_to(path: &Path, snap: &Snapshot) -> Result<()> {
 /// `bearclaw list` (the web server polls it), so without this a restore's "no longer dormant"
 /// could be overwritten by a poll that read the file a moment earlier.
 fn lock(path: &Path) -> Result<std::fs::File> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use crate::core::tools::PrivateMode;
     if let Some(dir) = path.parent() {
         std::fs::DirBuilder::new()
             .recursive(true)
-            .mode(0o700)
+            .private(0o700)
             .create(dir)?;
     }
     let mut name = path.as_os_str().to_owned();
@@ -397,7 +397,7 @@ fn lock(path: &Path) -> Result<std::fs::File> {
         .create(true)
         .truncate(false)
         .write(true)
-        .mode(0o600)
+        .private(0o600)
         .open(PathBuf::from(name))?;
     f.lock()?;
     Ok(f)
@@ -1634,7 +1634,7 @@ fn usable_dir(cwd: &str, warnings: &mut Vec<String>) -> String {
     if !expanded.is_empty() && Path::new(&expanded).is_dir() {
         return expanded;
     }
-    let home = dirs::home_dir()
+    let home = crate::core::tools::home_dir()
         .map(|h| h.display().to_string())
         .unwrap_or_else(|| "/".into());
     warnings.push(format!(

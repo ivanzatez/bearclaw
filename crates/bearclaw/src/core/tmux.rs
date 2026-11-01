@@ -263,9 +263,25 @@ pub fn attach(name: &str) -> Result<()> {
     if inside {
         return run(&args);
     }
-    use std::os::unix::process::CommandExt;
-    let err = tmux().args(&args).exec();
-    Err(Error::Other(format!("cannot exec tmux: {err}")))
+    exec_or_wait(tmux().args(&args), "tmux")
+}
+
+/// Replace this process with `cmd` (Unix). Windows has no exec: run it in this
+/// console, then exit with its status, which looks the same from outside.
+pub fn exec_or_wait(cmd: &mut Command, what: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = cmd.exec();
+        Err(Error::Other(format!("cannot exec {what}: {err}")))
+    }
+    #[cfg(not(unix))]
+    {
+        let st = cmd
+            .status()
+            .map_err(|e| Error::Other(format!("cannot run {what}: {e}")))?;
+        std::process::exit(st.code().unwrap_or(1));
+    }
 }
 
 // --- stale sessions ----------------------------------------------------------
@@ -602,6 +618,13 @@ pub fn panes() -> Vec<PaneInfo> {
 
 /// `(pid, ppid, stat)` for every process.
 pub fn procs() -> Vec<(i64, i64, String)> {
+    if cfg!(windows) {
+        // No job-control state on Windows: nothing is ever reported suspended.
+        return crate::core::procs::table()
+            .into_iter()
+            .map(|p| (p.pid, p.ppid, String::new()))
+            .collect();
+    }
     let Ok(out) = Command::new("ps")
         .args(["-Ao", "pid=,ppid=,stat="])
         .output()

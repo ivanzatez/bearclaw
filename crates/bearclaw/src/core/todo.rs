@@ -202,7 +202,11 @@ pub fn path() -> PathBuf {
     std::env::var_os("XDG_STATE_HOME")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/state"))
+        .unwrap_or_else(|| {
+            crate::core::tools::home_dir()
+                .unwrap_or_default()
+                .join(".local/state")
+        })
         .join("bearclaw/todo.json")
 }
 
@@ -218,7 +222,7 @@ pub fn load(path: &Path) -> Result<Todo> {
 
 /// Lock, load, change, save. `f`'s error leaves the file as it was.
 pub fn update<T>(path: &Path, f: impl FnOnce(&mut Todo) -> Result<T>) -> Result<T> {
-    use std::os::unix::fs::OpenOptionsExt;
+    use crate::core::tools::PrivateMode;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -228,7 +232,7 @@ pub fn update<T>(path: &Path, f: impl FnOnce(&mut Todo) -> Result<T>) -> Result<
         .create(true)
         .truncate(false)
         .write(true)
-        .mode(0o600)
+        .private(0o600)
         .open(PathBuf::from(lock))?;
     guard.lock()?;
     let mut todo = load(path)?;

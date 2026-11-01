@@ -31,7 +31,7 @@ pub fn run(action: &SkillAction) -> Result<()> {
 }
 
 fn install(force: bool) -> Result<PathBuf> {
-    let dir = dirs::home_dir()
+    let dir = crate::core::tools::home_dir()
         .ok_or_else(|| Error::Other("cannot determine home directory".into()))?
         .join(".claude")
         .join("skills")

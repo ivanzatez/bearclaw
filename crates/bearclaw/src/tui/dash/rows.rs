@@ -397,7 +397,11 @@ fn shorten_path(loc: String, label: &str, room: usize) -> Option<String> {
     if width_of(&loc) <= cap {
         return Some(loc);
     }
-    let tail = loc.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let tail = loc
+        .trim_end_matches(crate::core::tools::is_sep)
+        .rsplit(crate::core::tools::is_sep)
+        .next()
+        .unwrap_or("");
     (!tail.is_empty() && width_of(tail) <= cap && !echoes_terminal(tail, label))
         .then(|| tail.to_string())
 }
@@ -1012,7 +1016,10 @@ mod tests {
     /// An absolute path under the *real* home directory: `home_rel` only rewrites
     /// that one, and these tests are about what a `~`-relative row looks like.
     fn home(rest: &str) -> String {
-        format!("{}/{rest}", dirs::home_dir().unwrap().display())
+        format!(
+            "{}/{rest}",
+            crate::core::tools::home_dir().unwrap().display()
+        )
     }
 
     fn at(dir: &str, tmux: &str) -> Session {

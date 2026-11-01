@@ -78,13 +78,15 @@ fn git_root(dir: &str) -> Option<String> {
     c.args(["-C", dir, "rev-parse", "--show-toplevel"]);
     let got = hosts::capture(c, Duration::from_secs(2)).ok()?;
     let top = got.stdout.trim();
-    (got.code == Some(0) && top.starts_with('/')).then(|| top.to_string())
+    (got.code == Some(0) && crate::core::tools::is_abs(top)).then(|| top.to_string())
 }
 
 /// The session's directory on this machine (absolute, `~` expanded) and its git root.
 fn dirs_of(src: &Source, b: &Brief) -> (Option<String>, Option<String>) {
     let cwd = src.cwd().map(String::from).or_else(|| b.meta_str("cwd"));
-    let abs = cwd.map(|c| expand_tilde(&c)).filter(|c| c.starts_with('/'));
+    let abs = cwd
+        .map(|c| expand_tilde(&c))
+        .filter(|c| crate::core::tools::is_abs(c));
     let root = abs
         .as_deref()
         .filter(|d| std::path::Path::new(d).is_dir())
@@ -234,8 +236,8 @@ pub fn set(target: &str, json: bool, expect_updated: Option<&str>) -> Result<()>
 /// Put `body` in a temp file, open the editor, read it back. → (text, temp path). The caller
 /// removes the file once the edit is safely saved; on failure it stays, so nothing is lost.
 fn edit_text(body: &str, id: &str) -> Result<(String, PathBuf)> {
+    use crate::core::tools::PrivateMode;
     use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt;
     let short: String = id.chars().take(8).collect();
     let path = std::env::temp_dir().join(format!(
         "bearclaw-brief-{short}-{}-{}.md",
@@ -245,7 +247,7 @@ fn edit_text(body: &str, id: &str) -> Result<(String, PathBuf)> {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .private(0o600)
         .open(&path)?;
     f.write_all(body.as_bytes())?;
     drop(f);
@@ -427,7 +429,7 @@ pub fn open(t: &Target, target: &str) -> Result<()> {
                     v["gitRoot"]
                         .as_str()
                         .or_else(|| v["absCwd"].as_str())
-                        .filter(|p| p.starts_with('/'))
+                        .filter(|p| crate::core::tools::is_abs(p))
                         .map(String::from)
                         .ok_or_else(|| {
                             Error::Other(format!(

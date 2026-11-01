@@ -127,14 +127,19 @@ fn ensure_creates_once_with_the_skeleton() {
     );
     assert!(v["body"].as_str().unwrap().starts_with("> Shared context"));
     // The file is private.
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path).unwrap().permissions().mode();
-    assert_eq!(mode & 0o777, 0o600);
-    let dmode = std::fs::metadata(t.env.path("stacks"))
-        .unwrap()
-        .permissions()
-        .mode();
-    assert_eq!(dmode & 0o777, 0o700);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let dmode = std::fs::metadata(t.env.path("stacks"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(dmode & 0o777, 0o700);
+    }
+    #[cfg(not(unix))]
+    let _ = &path;
 
     // Again: the same stack, not a new one.
     let again = t.json(&["stack", "ensure", A, "--no-llm", "--json"]);

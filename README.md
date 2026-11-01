@@ -99,6 +99,21 @@ If linking fails with "You have not agreed to the Xcode license agreements", run
 `sudo xcodebuild -license accept`, or build against the Command Line Tools:
 `DEVELOPER_DIR=/Library/Developer/CommandLineTools cargo install --path crates/bearclaw`.
 
+### Windows
+
+bearclaw also runs natively on Windows (no WSL). [psmux](https://github.com/marlocarlo/psmux)
+stands in for tmux (it ships a `tmux.exe`), and the panes run Git Bash, so the shell lines bearclaw
+types (`cd … && claude …`) work as they do on a Mac. You need Git for Windows, psmux, Claude Code
+and a Rust toolchain (the GNU one works without Visual Studio, given a MinGW-w64 such as WinLibs on
+`PATH`). Point psmux at Git Bash in `%USERPROFILE%\.tmux.conf`:
+
+```
+set -g default-shell "C:/Program Files/Git/bin/bash.exe"
+```
+
+Then `cargo install --path crates/bearclaw` and run `bearclaw` from any terminal. iTerm, launchd
+services and the Keychain are macOS-only; Codex and pi sessions are not discovered on Windows.
+
 For the phone: `bearclaw web build`, then `bearclaw web serve` on each machine, and open
 `http://<tailscale-ip>:7777`. It looks like the dashboard (the Claw theme: monospace, the same
 colours) and has its tabs along the top: Sessions, Claw (chat with it, under the druid's card),
